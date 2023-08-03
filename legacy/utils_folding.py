@@ -21,15 +21,17 @@ import h5py
 import os
 import shutil
 
-# For error/warning control
-from sys import exit
-import warnings
-
 # For computation
-import subprocess
 import numpy as np
 import pyfftw
 pyfftw.interfaces.cache.enable()
+
+from sys import path, exit
+path.append('/appalachia/d6/yujie/voxelize-master/voxelize')
+path.append('/appalachia/d6/yujie/voxelize-master')
+
+from voxelize import Voxelize
+Voxelize.__init__(self=Voxelize, use_gpu=False, network_dir=None) # type: ignore
 from utils_spctrm import PowerSpectrum
 
 # For plotting
@@ -37,11 +39,23 @@ import matplotlib.pyplot as plt
 plt.style.use('niceplot2jay.mplstyle')
 from matplotlib.colors import LogNorm
 
+
 # For performance measurement
 import time
 from memory_profiler import profile
 
 
+
+
+PRINT_LOG = True
+
+def enable_logging():
+  global PRINT_LOG
+  PRINT_LOG = True
+
+def disable_logging():
+  global PRINT_LOG
+  PRINT_LOG = False
 
 def init_dir(run_output_dir, auto_overwrite=False):
   # Prepare output folder
@@ -119,69 +133,59 @@ class SimulationParticles():
     return h
 
 
-  def interp_to_field(self, Nsize, eps=0., auto_padding=True,
-                      data_file='data.pts', query_file='query.pts', 
-                      output_file='ann_output.save'):
-    """ Interpolate velocity using a 3d histogram + ANN. 
-    
-    Note
-    ----
+  def interp_to_field(self, Nsize, smoothing_rate=1., auto_padding=True, adaptive_smoothing=True):
+    """ Interpolate velocity using Voxelize by v = (m*v)_i/m_i.
 
-
+    Issue
+    -----
+     - voxelize could cause the edge of a particle/cloud to fall off. 
+     Velocity here won't have this issue when we need only the divided 
+     value where the momentum and mass fall-off could cancel out.
     """
     t0 = time.perf_counter()
-    print("Interpolating velocity field...")
+    print("Interpolating velocity field...") if PRINT_LOG else None
 
     Lcell = self.Lbox / Nsize
+    h = self.h(smoothing_rate=smoothing_rate)
+    rho = self.rho(smoothing_rate=smoothing_rate)
+
     if auto_padding is True:
-      upper_padding = np.max(self.pos - self.Lbox) # 3 components
-      lower_padding = np.max(0 - self.pos) # 3 components
-      Lpad = np.max((upper_padding, lower_padding)) # max in 6 values of 6 sides
-      Lpadded = self.Lbox + 2 * Lpad
-      Npadded = Nsize + 2 * int(Lpad/Lcell)
-      pos_padded = self.pos + Lpad # move to the center and avoid negative coordinates for deposit_to_grid()
-      # Use padded in histogram creation, but not in query points
-      print("Padding complete. Padded box length: {},"
-            " Padded box size: {}".format(Lpadded, Npadded))
+      # Calculate the length that particles exceed the box on each side.
+      # The calculation is vectorized.
+      hhh = np.stack((h,h,h),axis=1)
+      upper_padding = np.max(self.pos + hhh - self.Lbox, axis=0)
+      lower_padding = np.max(hhh - self.pos, axis=0)
+
+      # Because Voxelize assumes periodic boundary condition, the padding can be
+      # only half of the maximum padding
+      padding = np.max((upper_padding, lower_padding)) / 2 
+      _Lbox = self.Lbox + 2*padding
+      _pos = self.pos
+      _Nsize = Nsize + 2*int(padding/Lcell)
+      print('Padding: ', padding, 'Lbox: ', _Lbox, 'Nsize: ', _Nsize)
+      
+      # Log
+      t = time.perf_counter() - t0
+      print("Auto padding done. Time elapsed: {:.2f} s".format(t)) if PRINT_LOG else None
     else:
-      Lpadded = self.Lbox
-      Npadded = Nsize
-      pos_padded = self.pos
+      _Lbox = self.Lbox
+      _pos = self.pos
+      _Nsize = Nsize
 
     # Interpolation
-    # Step 1, histogram deposition 
-    # 
-    ### future update: using rho instead of m is because of the feature of voxelize,
-    ### should change to m when using ann
-    #
     # vec = [vx*rho, vy*rho, vz*rho, rho] -> [(vx*rho)_i, (vy*rho)_i, (vz*rho)_i, rho_i]
-    # Shape of vec is (Nsize, Nsize, Nsize, 4)
-    vec = np.stack((self.v[:,0] * self.density, 
-                    self.v[:,1] * self.density, 
-                    self.v[:,2] * self.density, 
-                    self.density), axis=1) # vectorize as much as possible to save time
-    vec_histgrid = deposit_to_grid(f=vec, pos=pos_padded, Nsize=Npadded, Lbox=Lpadded) # issue: possible overbound
-    vec_hist_pts = np.reshape(vec_histgrid, (Npadded**3, 4))
-        # directly reshape to (Npadded**3, 4) would produce wrong results
-    filter = [vec_hist_pts[:, 3] != 0]
-    vec_hist_pts = vec_hist_pts[tuple(filter)] # field values of non-zero data points
-
-    grid_pos = make_grid_coords(Lbox=Lpadded, Nsize=Npadded)
-    data_pos = grid_pos[tuple(filter)] # coordinates of non-zero data points
-
-    if auto_padding is True:
-      data_pos -= Lpad # return coordinates to its true value
-
-    # Step 2, ANN interpolation
-    # vec_grid = ann_to_grid(f=vec_hist_pts, Nsize=_Nsize, file=output_file)
-    vec_grid = ann_interpolate(data_pos=data_pos, f=vec_hist_pts, Lbox=self.Lbox, 
-                               Nsize=Nsize, eps=eps, query_pos=None, data_file=data_file,
-                               query_file=query_file, output_file=output_file)
+    vec = np.stack((self.v[:,0]*rho, self.v[:,1]*rho, self.v[:,2]*rho, rho), axis=1)
+    vec_grid = Voxelize.__call__(self=Voxelize, box_L=_Lbox, # type: ignore
+      coords=_pos, radii=h, field=vec, box=_Nsize)
     v_grid, m_grid = _vec_to_vm_grid(vec_grid=vec_grid, Lcell=Lcell)
 
     # Log
     t = time.perf_counter() - t0
-    print("Interpolation done. Time elapsed: {:.2f} s".format(t))
+    print("Interpolation done. Time elapsed: {:.2f} s".format(t)) if PRINT_LOG else None
+
+    if auto_padding is True:
+      v_grid = v_grid[:Nsize, :Nsize, :Nsize, :]
+      m_grid = m_grid[:Nsize, :Nsize, :Nsize]
 
     # Create Field object
     simField3D = SimulationField3D(v_grid, m_grid, Lbox=self.Lbox, Nsize=Nsize)
@@ -244,7 +248,8 @@ class SimulationParticles():
           blockParticles.pos[:,2] -= t*Lblock
 
           subField = blockParticles.interp_to_field(Nsize=Nblock, 
-                                                    auto_padding=True) # return a padded and trimmed field.
+                                                 smoothing_rate=smoothing_rate, 
+                                                 auto_padding=True) # return a padded and trimmed field.
           
           # Create a BlockField3D object and save for later use
           blockField = blocksDecomp._BlockField3D(v=subField.v(), mass=subField.mass, 
@@ -308,10 +313,7 @@ class SimulationParticles():
   def total_momentum(self) -> np.ndarray:
     """ Compute the total momentum of the particles.
     """
-    px = np.sum(self.mass * self.v[:, 0])
-    py = np.sum(self.mass * self.v[:, 1])
-    pz = np.sum(self.mass * self.v[:, 2])
-    return np.array([px, py, pz])
+    return np.sum(self.mass * self.v, axis=0)
 
   def total_kinetic_energy(self) -> float:
     """ Compute the total kinetic energy of the particles.
@@ -347,17 +349,19 @@ class SimulationField3D():
 
   def velocity_power(self) -> np.ndarray: ### future update: write this outside the class
     # print_log to check conservation
-    print(
-      'Specific kinetic energy before FFT: {:.2e}'.format(
-      0.5 * np.mean(self.vx**2 + self.vy**2 + self.vz**2))
-      )
+    if PRINT_LOG is True:
+      print(
+        'Specific kinetic energy before FFT: {:.2e}'.format(
+        0.5 * np.mean(self.vx**2 + self.vy**2 + self.vz**2))
+        )
     # Calculate FFT and power
     P = _vector_power(self.vx, self.vy, self.vz, self.Lbox, self.Nsize)
     # print_log to check conservation
-    print(
-      'Specific kinetic energy after FFT: {:.2e}'.format(
-      np.sum(P)*(2*np.pi/self.Lbox)**3)
-      )
+    if PRINT_LOG is True:
+      print(
+        'Specific kinetic energy after FFT: {:.2e}'.format(
+        np.sum(P)*(2*np.pi/self.Lbox)**3)
+        )
     return P
 
   def momentum_power(self) -> np.ndarray:
@@ -366,17 +370,19 @@ class SimulationField3D():
     py = self.vx * self.mass
     pz = self.vx * self.mass
     # print_log to check conservation
-    print(
-      'Conserved quantity before FFT: {:.2e}'.format(
-      0.5 * np.mean(px**2 + py**2 + pz**2))
-      )
+    if PRINT_LOG is True:
+      print(
+        'Conserved quantity before FFT: {:.2e}'.format(
+        0.5 * np.mean(px**2 + py**2 + pz**2))
+        )
     # Calculate FFT and power
     P = _vector_power(px, py, pz, self.Lbox, self.Nsize)
     # print_log to check conservation
-    print(
-      'Conserved quantity after FFT: {:.2e}'.format(
-      np.sum(P)*(2*np.pi/self.Lbox)**3)
-      )
+    if PRINT_LOG is True:
+      print(
+        'Conserved quantity after FFT: {:.2e}'.format(
+        np.sum(P)*(2*np.pi/self.Lbox)**3)
+        )
       
     return P
 
@@ -384,17 +390,19 @@ class SimulationField3D():
     # kinetic energy grid
     E = self.mass * (self.vx**2 + self.vy**2 + self.vz**2)
     # print_log to check conservation
-    print(
-      'Conserved quantity before FFT: {:.2e}'.format(
-      0.5 * np.mean(E**2))
-      )
+    if PRINT_LOG is True:
+      print(
+        'Conserved quantity before FFT: {:.2e}'.format(
+        0.5 * np.mean(E**2))
+        )
     # Calculate FFT and power
     P = _scalar_power(E, self.Lbox, self.Nsize)
     # print_log to check conservation
-    print(
-      'Conserved quantity after FFT: {:.2e}'.format(
-      np.sum(P)*(2*np.pi/self.Lbox)**3)
-      )
+    if PRINT_LOG is True:
+      print(
+        'Conserved quantity after FFT: {:.2e}'.format(
+        np.sum(P)*(2*np.pi/self.Lbox)**3)
+        )
     return P
     
   def spctrm(self, quantity='velocity', kmin=None, kmax=None, kres=None) -> PowerSpectrum:
@@ -428,7 +436,8 @@ class SimulationField3D():
     Pkk[:,1] *= 4*np.pi*Pkk[:,0]**2
     spctrm = PowerSpectrum(Pkk)
 
-    print('Conserved quantity after sampling: {:.2e}'.format(spctrm.energy()))
+    if PRINT_LOG is True:
+      print('Conserved quantity after sampling: {:.2e}'.format(spctrm.energy()))
 
     return spctrm
 
@@ -484,19 +493,6 @@ class SimulationField3D():
   def total_kinetic_energy(self) -> float:
     E = 0.5 * np.sum(self.mass * (self.vx**2 + self.vy**2 + self.vz**2))
     return E
-
-  def total_mass(self) -> float:
-    """ Compute the total mass of the field.
-    """
-    return np.sum(self.mass)
-
-  def total_momentum(self) -> np.ndarray:
-    """ Compute the total momentum of the field.
-    """
-    px = np.sum(self.mass * self.vx)
-    py = np.sum(self.mass * self.vy)
-    pz = np.sum(self.mass * self.vz)
-    return np.array([px, py, pz])
 
   def plot_density_slice(self, index, axis=2, ax=None, **kwargs):
     """ Plot a slice of density field. Convert to nHcgs units.
@@ -568,7 +564,7 @@ def plot_density2d(density_slice_nHcgs, Lbox, Nsize, ax=None, **kwargs):
   plt.colorbar(p,label=r"$n_H$ $(\rm cm^{-3})$",ax=ax)
 
 def plot_velocity2d(velocity_slice, Lbox, Nsize, ax=None, **kwargs):
-  """ Plot a 2d velocity field of one component.
+  """ Plot a 2d velocity field.
   """
 
   # Create coordinate grid for pcolormesh
@@ -770,22 +766,21 @@ def _vec_to_vm_grid(vec_grid, Lcell):
   interp_field.
   """
   # Extract mass from vec_grid
-  rho_grid = vec_grid[:,:,:,3] # Is this problematic in histogram? pho = pho1+pho2?
+  rho_grid = vec_grid[:,:,:,3]
   m_grid = rho_grid * Lcell**3
 
   # Avoid divide by zero before extracting velocity from vec_grid. 
   # Whereever rho_grid is 0, v_grid is 0. So this shouldn't cause trouble.
-  # m_grid[m_grid == 0] = 1
   # This is faster than using v_grid = np.nan_to_num(v_grid) after dividing by 
-  # rho_grid. But the numpy filtering is still taking performance. Best case 
-  # scenario is to avoid this line.
+  # rho_grid.
+  rho_grid[rho_grid == 0] = 1
 
   # v = (rho*v)_i/rho_i
   vec_grid[:,:,:,0] /= rho_grid
   vec_grid[:,:,:,1] /= rho_grid
   vec_grid[:,:,:,2] /= rho_grid
 
-  # Return velocity and mass grids
+  # Returen velocity and mass grids
   return vec_grid[:,:,:,0:3], m_grid
 
 
@@ -915,7 +910,7 @@ def high_pass_filter_2d(field, Lbox, low_k = None): # not very useful
     Lcell = Nsize/Lbox
     low_k = 2*np.pi/Lcell
   pixel_rad = low_k//dk
-  grid = np.arange(0, Nsize)
+  grid = np.arange(0,Nsize)
   x, y = np.meshgrid(grid, grid, indexing='ij')
   x_ctr = x - Nsize//2
   y_ctr = y - Nsize//2
@@ -967,131 +962,6 @@ def deposit_to_grid(f, pos, Nsize, Lbox): # future update: incorporate with Part
   np.add.at(f_grid, tuple(index), f)
 
   return f_grid
-
-
-def ann_interpolate(data_pos, f, Lbox, Nsize, eps, query_pos=None, 
-                    data_file='data.pts', query_file='query.pts', 
-                    output_file='ann_output.save', overwrite=True):
-  
-  # Prepare data.pts
-  save_ann_pts(data_pos, file=data_file)
-  print("Data file saved.")
-
-  # Prepare query.pts if not existed
-  if overwrite is True:           # set overwrite true when testing. 
-    if query_pos is None:
-      query_pos = make_grid_coords(Lbox=Lbox, Nsize=Nsize)
-    save_ann_pts(query_pos, file=query_file) # prepare the grids to be interpolated, save as 
-    print("Query file saved.")
-  else:
-    print("Query file found.")
-
-  # Run approximate nearest neighbor
-  maxpts = len(data_pos) # set maximum number of data points to the exact number of data points
-  ann_run(eps=eps, maxpts=maxpts) # call the ann library through command line
-  
-  # Read the ANN output and deposit the grids
-  f_grid = ann_to_grid(f, Nsize, file=output_file)
-
-  return f_grid
-
-def save_ann_data_pts(data_pos, file='data.pts') -> None:
-  """
-  Prepare data.pts for ANN from simulation data. The data points are the 
-  coordinates of all particles.
-  """
-  np.savetxt(file, data_pos, delimiter='\t', fmt='%.16f') # .16 is probably too much.
-
-
-def make_grid_coords(Lbox, Nsize) -> np.ndarray:
-  # Create coordinate grid
-  Lcell = Lbox/Nsize
-  xSpace = np.linspace(Lcell/2, Lbox + Lcell/2, Nsize)
-  grid = np.meshgrid(xSpace, xSpace, xSpace, indexing='ij')
-  # Mock particle coordinates
-  grid_pos = np.reshape(grid, (3, Nsize**3)).T # shape: (Nsize**3, 3) but reshape to (Nsize**3, 3) won't give correct result
-  return grid_pos
-
-def save_ann_query_pts(query_pos, file='query.pts') -> None:
-  """
-  Prepare query.pts for ANN. The query points are the center of each cell in the
-  grid.
-  """
-  # Prepare query.pts
-  np.savetxt(file, query_pos, delimiter='\t', fmt='%.16f')
-
-def save_ann_pts(pos, file) -> None:
-  """
-  """
-  np.savetxt(file, pos, delimiter='\t', fmt='%.16f')
-
-
-def ann_run(eps, maxpts, k=1, data_file='data.pts', query_file='query.pts', 
-                    output_file='ann_output.save'):
-  """
-  Run ANN by executing command lines.
-  `ann_sample [-d dim] [-max mpts] [-nn k] [-e eps] [-df data] [-qf query]`
-  """
-  # ANN_PATH = '/appalachia/d6/yujie/ann_1.1.2/sample'
-
-  # Compile my_ann_sample.cpp
-  ret = subprocess.run(['g++ /appalachia/d6/yujie/ann_1.1.2/sample/my_ann_sample.cpp'
-                        ' -o /appalachia/d6/yujie/ann_1.1.2/sample/ann_sample'
-                        ' -I/appalachia/d6/yujie/ann_1.1.2/include'
-                        ' -L/appalachia/d6/yujie/ann_1.1.2/lib -lANN'], 
-                        shell=True)
-  if ret.returncode != 0:
-    raise Exception("Error occurred when compling ANN.")
-  
-  # Time
-  t0 = time.perf_counter()
-  
-  # Run ANN
-  ret = subprocess.run(['time /appalachia/d6/yujie/ann_1.1.2/sample/ann_sample'
-                        ' -e {} -max {} -nn {}'
-                        ' -df {} -qf {} > {}'.format(eps, maxpts, k, data_file, 
-                                                     query_file, output_file)], 
-                       shell=True)
-  if ret.returncode != 0:
-    raise Exception("Error occurred when running ANN.")
-  
-  # Time
-  t1 = time.perf_counter()
-  t = t1 - t0
-  print("Approximate Nearest Neighbour complete. Time taken: {:.2f} s.".format(t))
-
-def ann_to_grid(f, Nsize, file):
-  """
-  Using the approximate nearest neighbor output to interpolate some quantity 
-  (e.g. mass, velocity, etc.) at data points to query points.
-
-  The output.save is organized in the following form:
-  first column: number of nearest neighbor, 0~k-1
-  second column: index of the data point
-  third column: distance between the data point and the query point
-  
-  save is of shape (query points number*k, 3)
-  e.g.
-  [[ 0.    5.    0.249455]
-  [ 1.    4.    0.26852 ]
-  [ 0.    0.    0.332847]
-  [ 1.     15.    0.35775 ]]
-  """
-  # Read data from output.save
-  ann_save = np.loadtxt(file, delimiter='\t')
-  index = np.array(ann_save[:,1], dtype=int)
-  
-  # transfer particle-wise data to a data cube
-  if np.ndim(f) == 1:     # scalar data
-    data_grid = f[index]
-    data_grid = np.reshape(data_grid, (Nsize, Nsize, Nsize))
-  elif np.ndim(f) == 2:   # vector data
-    data_grid = f[index, :]
-    data_grid = np.reshape(data_grid, (Nsize, Nsize, Nsize, f.shape[1]))
-  else:
-    raise Exception("Unsupported data shape.")
-  
-  return data_grid
 
 
 def fold_particles(pos, m):  # future update: incorporate with Particles class
