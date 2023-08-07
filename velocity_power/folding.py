@@ -30,7 +30,7 @@ import subprocess
 import numpy as np
 import pyfftw
 pyfftw.interfaces.cache.enable()
-from utils_spctrm import PowerSpectrum
+from velocity_power.spctrm import PowerSpectrum
 
 # For plotting
 import matplotlib.pyplot as plt
@@ -119,7 +119,7 @@ class SimulationParticles():
     return h
 
 
-  def interp_to_field(self, Nsize, eps=0., auto_padding=True,
+  def interp_to_field(self, Nsize, eps=0., auto_padding=False,
                       data_file='data.pts', query_file='query.pts', 
                       output_file='ann_output.save'):
     """ Interpolate velocity using a 3d histogram + ANN. 
@@ -147,13 +147,11 @@ class SimulationParticles():
       Lpadded = self.Lbox
       Npadded = Nsize
       pos_padded = self.pos
+      print("Box length: {}, box size: {}".format(Lpadded, Npadded))
 
     # Interpolation
     # Step 1, histogram deposition 
-    # 
-    ### future update: using rho instead of m is because of the feature of voxelize,
-    ### should change to m when using ann
-    #
+  
     # vec = [vx*rho, vy*rho, vz*rho, rho] -> [(vx*rho)_i, (vy*rho)_i, (vz*rho)_i, rho_i]
     # Shape of vec is (Nsize, Nsize, Nsize, 4)
     vec = np.stack((self.v[:,0] * self.density, 
@@ -166,8 +164,8 @@ class SimulationParticles():
     filter = [vec_hist_pts[:, 3] != 0]
     vec_hist_pts = vec_hist_pts[tuple(filter)] # field values of non-zero data points
 
-    grid_pos = make_grid_coords(Lbox=Lpadded, Nsize=Npadded)
-    data_pos = grid_pos[tuple(filter)] # coordinates of non-zero data points
+    data_pos = make_grid_coords(Lbox=Lpadded, Nsize=Npadded)
+    data_pos = data_pos[tuple(filter)] # coordinates of non-zero data points
 
     if auto_padding is True:
       data_pos -= Lpad # return coordinates to its true value
@@ -188,7 +186,8 @@ class SimulationParticles():
 
     return simField3D
 
-  def interp_to_blocks(self, run_output_dir, nblocks, Nblock, smoothing_rate=1.):
+  def interp_to_blocks(self, run_output_dir, nblocks, Nblock, eps,
+                       smoothing_rate=1.):
     """
     Interpolate velocity using Voxelize by v = (m*v)_i/m_i to `nblocks`^3 blocks
     (`BlockField3D`) of size `Nblock`^3 each and save them to a subfolder of
@@ -203,8 +202,9 @@ class SimulationParticles():
     Nblock : int
       Size of each block in each direction.
     smoothing_rate : float
-      `Smoothing length h = particle radius * smoothing_rate`. The total mass is kept
-      constant while doing so.
+      `Smoothing length h = particle radius * smoothing_rate`. This parameter
+      only affects the padding length and have no effect on the interpolation
+      which is based on nearest neighbor.
 
     Returns
     -------
@@ -213,9 +213,9 @@ class SimulationParticles():
     
     Notes
     -----
-    The output folder will be named as `'Ng{}Nb{}'.format(Nblock*nblocks, 
-    Nblock)` where Ng is the number of total grid points combined, Nb 
-    is the size of each block.
+    The output folder will be named as `[run_output_dir]Ng[Nblock*nblocks]Nb[Nblock]` 
+    where Ng is the number of total grid points combined, Nb is the size of each 
+    block.
     """
     
     # initialize a Blocks object
@@ -243,7 +243,7 @@ class SimulationParticles():
           blockParticles.pos[:,1] -= s*Lblock
           blockParticles.pos[:,2] -= t*Lblock
 
-          subField = blockParticles.interp_to_field(Nsize=Nblock, 
+          subField = blockParticles.interp_to_field(Nsize=Nblock, eps=eps,
                                                     auto_padding=True) # return a padded and trimmed field.
           
           # Create a BlockField3D object and save for later use
@@ -549,7 +549,8 @@ class SimulationField3D():
     # Plot
     plot_velocity2d(velocity_slice, Lbox=self.Lbox, Nsize=self.Nsize, ax=ax, **kwargs)
 
-def plot_density2d(density_slice_nHcgs, Lbox, Nsize, ax=None, **kwargs):
+def plot_density2d(density_slice_nHcgs, Lbox, Nsize, ax=None, 
+                   vmin=.1, vmax=1e3, **kwargs):
   """ Plot a 2d density field.
   """
 
@@ -561,7 +562,8 @@ def plot_density2d(density_slice_nHcgs, Lbox, Nsize, ax=None, **kwargs):
   # Plot the density slice with unit label.
   if ax is None:
     fig, ax = plt.subplots(figsize=(10,7))
-  p = ax.pcolormesh(X, Y, density_slice_nHcgs, norm=LogNorm(vmin=.1,vmax=1e3), **kwargs)
+  p = ax.pcolormesh(X, Y, density_slice_nHcgs, 
+                    norm=LogNorm(vmin=vmin,vmax=vmax), **kwargs)
   ax.set_aspect('equal')
   ax.set_xlabel("X (kpc)")
   ax.set_ylabel("Y (kpc)")
@@ -763,8 +765,6 @@ class BlocksDecomposition():
       return pickle.load(file)
 
 
-    
-    
 def _vec_to_vm_grid(vec_grid, Lcell):
   """ This function restore mass and velocity from vec_grid. Used internally in
   interp_field.
