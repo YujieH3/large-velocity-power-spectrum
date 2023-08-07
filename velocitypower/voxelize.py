@@ -1,12 +1,7 @@
 import numpy as np
 import time
 
-from sys import path
-
-path.append("/appalachia/d6/yujie/voxelize-master/voxelize")
-path.append("/appalachia/d6/yujie/voxelize-master")
 from voxelize import Voxelize
-
 Voxelize.__init__(self=Voxelize, use_gpu=False, network_dir=None)  # type: ignore
 
 from velocitypower.folding import (
