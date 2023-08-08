@@ -37,7 +37,7 @@ You can now take a quick peek of the result
     simField.plot_velocity_field(component=0, index=128, axis=2, ax=ax[1])
     plt.show()
 
-To use Voxelize interpolator, simply run the following command instead
+To use Voxelize interpolator, simply run the following lines instead
 
 .. code-block:: python
 
