@@ -31,7 +31,7 @@ import numpy as np
 import pyfftw
 
 pyfftw.interfaces.cache.enable()
-from velocitypower.spctrm import PowerSpectrum
+from vpower.spctrm import PowerSpectrum
 
 # For plotting
 import matplotlib.pyplot as plt

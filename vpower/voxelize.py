@@ -4,7 +4,7 @@ import time
 from voxelize import Voxelize
 Voxelize.__init__(self=Voxelize, use_gpu=False, network_dir=None)  # type: ignore
 
-from velocitypower.folding import (
+from vpower.interp import (
     SimulationField3D,
     SimulationParticles,
     _vec_to_vm_grid,
