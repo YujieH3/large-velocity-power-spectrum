@@ -25,7 +25,7 @@ It can also
 
 .. toctree::
    :maxdepth: 2
-   :caption: Contents:
+   :caption: Contents
 
    getting_started
 

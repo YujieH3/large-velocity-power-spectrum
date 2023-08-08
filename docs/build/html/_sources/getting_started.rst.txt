@@ -13,10 +13,19 @@ Quickstart
 
 In this section you will be able to learn how to load a snapshot, interpolate the density and velocity field, and compute the first velocity power spectrum with Vpower.
 
+First import vpower
+
 .. code-block:: python
 
+    import sys
+    sys.path.append("/some_dir/vpower")
     import vpower.interp, vpower.spctrm
-    snapshot = "/dir/your_snapshot.hdf5"
+
+Then load the snapshot by
+
+.. code-block:: python
+
+    snapshot = "/some_dir/your_snapshot.hdf5"
     simParticles = vpower.interp.load_snapshot(snapshot)
 
 The :code:`load_snapshot` function loads the mass, density, and velocity of particles from the snapshot into a :code:`SimulationParticles` object. Now that you have the data, it is time to interpolate. With Vpower, interpolation is as simple as
