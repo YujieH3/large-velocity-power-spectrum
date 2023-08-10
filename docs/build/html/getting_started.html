@@ -307,6 +307,12 @@ document.write(`
 <div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="n">simField</span> <span class="o">=</span> <span class="n">simParticles</span><span class="o">.</span><span class="n">interp_to_field</span><span class="p">(</span><span class="n">Nsize</span><span class="o">=</span><span class="mi">256</span><span class="p">)</span>
 </pre></div>
 </div>
+<p>To use Voxelize interpolator, use <code class="code docutils literal notranslate"><span class="pre">voxelize_interp_to_field</span></code> instead of <code class="code docutils literal notranslate"><span class="pre">interp_to_field</span></code>. Before doing this you need to make sure the <a class="reference external" href="https://github.com/leanderthiele/voxelize">Voxelize</a> package is installed and import the <code class="code docutils literal notranslate"><span class="pre">vpower.voxelize</span></code> module that provides this method to the class <code class="code docutils literal notranslate"><span class="pre">SimulationParticles</span></code>.</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="kn">import</span> <span class="nn">vpower.voxelize</span>
+<span class="n">simField</span> <span class="o">=</span> <span class="n">simParticles</span><span class="o">.</span><span class="n">voxelize_interp_to_field</span><span class="p">(</span><span class="n">Nsize</span><span class="o">=</span><span class="mi">256</span><span class="p">)</span>
+</pre></div>
+</div>
+<p>You can try running both and compare the results.</p>
 <p>Now that the mass, density, and velocity of the particles is interpolated to <span class="math notranslate nohighlight">\(256^3\)</span> fields in a <code class="code docutils literal notranslate"><span class="pre">SimulationField3D</span></code> object. The mass, density, and velocity are interpolated at the same time because the interpolation process considers a mass-weighted average to calculate the velocity field. Therefore it is impossible to interpolate velocity alone without mass or density. (And since all pixels have equal volume so mass and density are basically the same thing except for a constant)</p>
 <p>You can now take a quick peek of the result</p>
 <div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="kn">import</span> <span class="nn">matplotlib.pyplot</span> <span class="k">as</span> <span class="nn">plt</span>
@@ -316,12 +322,6 @@ document.write(`
 <span class="n">plt</span><span class="o">.</span><span class="n">show</span><span class="p">()</span>
 </pre></div>
 </div>
-<p>To use Voxelize interpolator, simply run the following lines instead</p>
-<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="kn">import</span> <span class="nn">vpower.voxelize</span>
-<span class="n">simField</span> <span class="o">=</span> <span class="n">simParticles</span><span class="o">.</span><span class="n">voxelize_interp_to_field</span><span class="p">(</span><span class="n">Nsize</span><span class="o">=</span><span class="mi">256</span><span class="p">)</span>
-</pre></div>
-</div>
-<p>You can try running both and compare the results.</p>
 </section>
 </section>
 

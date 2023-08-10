@@ -23,13 +23,14 @@ It can also
 
    This project is under active development. If you have any question, feel free to contact us at `yujie.jay.he@foxmail.com <mailto:yujie.jay.he@foxmail.com>`_.
 
+.. [HWK1989] Performing Fourier transforms on extremely long data streams, Hocking WK. 1989. Comput. Phys. 3(1):59 `DOI:10.1063/1.168338 <https://doi.org/10.1063/1.168338>`_
+
 .. toctree::
    :maxdepth: 2
    :caption: Contents
 
    getting_started
 
-.. [HWK1989] Performing Fourier transforms on extremely long data streams, Hocking WK. 1989. Comput. Phys. 3(1):59 `DOI:10.1063/1.168338 <https://doi.org/10.1063/1.168338>`_
 
 .. Indices and tables
 .. ==================

@@ -38,6 +38,10 @@ def voxelize_interp_to_field(self, Nsize, smoothing_rate=1.0, auto_padding=True)
         # Because Voxelize assumes periodic boundary condition, the padding can be
         # only half of the maximum padding
         padding = np.max((upper_padding, lower_padding)) / 2
+        
+        if padding < 0:
+            padding = 0                  # keep the box size larger than specified
+
         _Lbox = self.Lbox + 2 * padding
         _pos = self.pos
         _Nsize = Nsize + 2 * int(padding / Lcell)

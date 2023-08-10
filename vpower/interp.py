@@ -169,7 +169,7 @@ class SimulationParticles:
 
         # Interpolation
         # Step 1, histogram deposition
-
+        t1 = time.perf_counter()
         # vec = [vx*rho, vy*rho, vz*rho, rho] -> [(vx*rho)_i, (vy*rho)_i, (vz*rho)_i, rho_i]
         # Shape of vec is (Nsize, Nsize, Nsize, 4)
         vec = np.stack(
@@ -186,7 +186,7 @@ class SimulationParticles:
         )  # issue: possible overbound
         vec_hist_pts = np.reshape(vec_histgrid, (Npadded ** 3, 4))
         # directly reshape to (Npadded**3, 4) would produce wrong results
-        filter = [vec_hist_pts[:, 3] != 0]
+        filter = [vec_hist_pts[:, 3] > 0]
         vec_hist_pts = vec_hist_pts[
             tuple(filter)
         ]  # field values of non-zero data points
@@ -196,6 +196,9 @@ class SimulationParticles:
 
         if auto_padding is True:
             data_pos -= Lpad  # return coordinates to its true value
+
+        t = time.perf_counter() - t1
+        print("Histogram deposition done. Time taken: {:.2f} s".format(t))
 
         # Step 2, ANN interpolation
         # vec_grid = ann_to_grid(f=vec_hist_pts, Nsize=_Nsize, file=output_file)
@@ -210,6 +213,7 @@ class SimulationParticles:
             query_file=query_file,
             output_file=output_file,
         )
+
         v_grid, m_grid = _vec_to_vm_grid(vec_grid=vec_grid, Lcell=Lcell)
 
         # Log
@@ -1080,10 +1084,12 @@ def ann_interpolate(
     overwrite=True,
 ):
 
+    t0 = time.perf_counter()
     # Prepare data.pts
     save_ann_pts(data_pos, file=data_file)
-    print("Data file saved.")
+    print("Data file saved. Time taken: {:.2f} s".format(time.perf_counter() - t0))
 
+    t0 = time.perf_counter()
     # Prepare query.pts if not existed
     if overwrite is True:  # set overwrite true when testing.
         if query_pos is None:
@@ -1091,18 +1097,20 @@ def ann_interpolate(
         save_ann_pts(
             query_pos, file=query_file
         )  # prepare the grids to be interpolated, save as
-        print("Query file saved.")
+        print("Query file saved. "
+              "Time taken: {:.2f} s".format(time.perf_counter() - t0))
     else:
         print("Query file found.")
 
     # Run approximate nearest neighbor
-    maxpts = len(
-        data_pos
-    )  # set maximum number of data points to the exact number of data points
+    maxpts = len(data_pos)  
+    # set maximum number of data points to the exact number of data points
     ann_run(eps=eps, maxpts=maxpts)  # call the ann library through command line
 
     # Read the ANN output and deposit the grids
+    t0 = time.perf_counter()
     f_grid = ann_to_grid(f, Nsize, file=output_file)
+    print("ANN output read. Time taken: {:.2f} s".format(time.perf_counter() - t0))
 
     return f_grid
 
@@ -1159,8 +1167,8 @@ def ann_run(
     # Compile my_ann_sample.cpp
     ret = subprocess.run(
         [
-            "g++ /appalachia/d6/yujie/ann_1.1.2/sample/my_ann_sample.cpp"
-            " -o /appalachia/d6/yujie/ann_1.1.2/sample/ann_sample"
+            "g++ /appalachia/d6/yujie/Test_PowerSpec/ann/ann_sample.cpp"
+            " -o /appalachia/d6/yujie/Test_PowerSpec/ann/ann_sample"
             " -I/appalachia/d6/yujie/ann_1.1.2/include"
             " -L/appalachia/d6/yujie/ann_1.1.2/lib -lANN"
         ],
@@ -1175,7 +1183,7 @@ def ann_run(
     # Run ANN
     ret = subprocess.run(
         [
-            "time /appalachia/d6/yujie/ann_1.1.2/sample/ann_sample"
+            "time /appalachia/d6/yujie/Test_PowerSpec/ann/ann_sample"
             " -e {} -max {} -nn {}"
             " -df {} -qf {} > {}".format(
                 eps, maxpts, k, data_file, query_file, output_file

@@ -52,6 +52,11 @@ exclude_patterns = []
 # html_theme = 'sphinx_rtd_theme'
 # html_theme = 'alabaster'
 html_theme = 'sphinx_book_theme'
+html_theme_options = {
+  "use_sidenotes": True,
+#     "show_navbar_depth": 2,
+}
+
 
 # Add any paths that contain custom static files (such as style sheets) here,
 # relative to this directory. They are copied after the builtin static files,

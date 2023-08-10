@@ -12,16 +12,19 @@ Welcome to Vpower's documentation!
 Vpower's main features include:
 
 - Center of mass velocity field interpolation
-- Velocity power spectrum computation with the folding technique [HWK1989]_, allowing a more extensive dynamical range
+- Velocity power spectrum computation with the folding technique [1]_, allowing a more extensive dynamical range
 
 It can also
 
 - Interpolate density field
 - Calculate momentum, kinetic energy field
 
+.. [1] Hocking WK. 1989. Comput. Phys. 3(1):59 `DOI:10.1063/1.168338 <https://doi.org/10.1063/1.168338>`_
+
 .. note:: 
 
    This project is under active development. If you have any question, feel free to contact us at `yujie.jay.he@foxmail.com <mailto:yujie.jay.he@foxmail.com>`_.
+
 
 .. toctree::
    :maxdepth: 2
@@ -29,7 +32,6 @@ It can also
 
    getting_started
 
-.. [HWK1989] Performing Fourier transforms on extremely long data streams, Hocking WK. 1989. Comput. Phys. 3(1):59 `DOI:10.1063/1.168338 <https://doi.org/10.1063/1.168338>`_
 
 .. Indices and tables
 .. ==================
