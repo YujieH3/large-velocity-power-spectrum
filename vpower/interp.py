@@ -72,11 +72,12 @@ def init_dir(run_output_dir, auto_overwrite=False):
 
 class SimulationParticles:
     def __init__(self, pos, mass, density, velocity, Lbox) -> None:
-        self.pos = pos
-        self.mass = mass
-        self.density = density
-        self.v = self.velocity = velocity  #
-        self.Lbox = Lbox
+        self.pos = pos                     # coordinate data of shape [Nparticles, 3]
+        self.mass = mass                   # mass data of shape [Nparticles]
+        self.density = density             # density data of shape [Nparticles]
+        self.v = self.velocity = velocity  # velocity data of shape [Nparticles, 3]
+        self.Lbox = Lbox                   # box size is given in creation
+        self.r = self.h()                  # radii is smoothing length with rate = 1.0
 
     def __len__(self) -> int:
         return len(self.pos)

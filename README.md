@@ -7,5 +7,5 @@
 <!-- [![](https://img.shields.io/github/last-commit/YujieH3/Large-Velocity-Power-Spectrum.svg)]() -->
 
 This is part of the code of a project to study the properties of interstellar 
-turbulence through computer simulations. 
+turbulence through simulations. 
 <!-- For more information, please refer to Vpower's [documentation](https://vpower.readthedocs.io/en/latest/). -->

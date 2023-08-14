@@ -2,6 +2,7 @@ import numpy as np
 import time
 
 from voxelize import Voxelize
+
 Voxelize.__init__(self=Voxelize, use_gpu=False, network_dir=None)  # type: ignore
 
 from vpower.interp import (
@@ -13,14 +14,14 @@ from vpower.interp import (
 
 
 def voxelize_interp_to_field(self, Nsize, smoothing_rate=1.0, auto_padding=True):
-    """ Interpolate velocity using Voxelize by v = (m*v)_i/m_i.
+    """Interpolate velocity using Voxelize by v = (m*v)_i/m_i.
 
-  Issue
-  -----
-    - voxelize could cause the edge of a particle/cloud to fall off. 
-    Velocity here won't have this issue when we need only the divided 
-    value where the momentum and mass fall-off could cancel out.
-  """
+    Issue
+    -----
+      - voxelize could cause the edge of a particle/cloud to fall off.
+      Velocity here won't have this issue when we need only the divided
+      value where the momentum and mass fall-off could cancel out.
+    """
     t0 = time.perf_counter()
     print("Interpolating velocity field...")
 
@@ -38,9 +39,9 @@ def voxelize_interp_to_field(self, Nsize, smoothing_rate=1.0, auto_padding=True)
         # Because Voxelize assumes periodic boundary condition, the padding can be
         # only half of the maximum padding
         padding = np.max((upper_padding, lower_padding)) / 2
-        
+
         if padding < 0:
-            padding = 0                  # keep the box size larger than specified
+            padding = 0  # keep the box size larger than specified
 
         _Lbox = self.Lbox + 2 * padding
         _pos = self.pos
@@ -88,33 +89,33 @@ def voxelize_interp_to_blocks(
     self, run_output_dir, nblocks, Nblock, smoothing_rate=1.0
 ):
     """
-  Interpolate velocity using Voxelize by v = (m*v)_i/m_i to `nblocks`^3 blocks
-  (`BlockField3D`) of size `Nblock`^3 each and save them to a subfolder of
-  output_dir.
+    Interpolate velocity using Voxelize by v = (m*v)_i/m_i to `nblocks`^3 blocks
+    (`BlockField3D`) of size `Nblock`^3 each and save them to a subfolder of
+    output_dir.
 
-  Parameters
-  ----------
-  output_dir : str
-    Path to the output folder.
-  nblocks : int
-    Number of blocks in each direction.
-  Nblock : int
-    Size of each block in each direction.
-  smoothing_rate : float
-    `Smoothing length h = particle radius * smoothing_rate`. The total mass is kept
-    constant while doing so.
+    Parameters
+    ----------
+    output_dir : str
+      Path to the output folder.
+    nblocks : int
+      Number of blocks in each direction.
+    Nblock : int
+      Size of each block in each direction.
+    smoothing_rate : float
+      `Smoothing length h = particle radius * smoothing_rate`. The total mass is kept
+      constant while doing so.
 
-  Returns
-  -------
-  blocksDecomp : BlocksDecomposition
-    A BlocksDecomposition object containing the information of the blocks.
-  
-  Notes
-  -----
-  The output folder will be named as `'Ng{}Nb{}'.format(Nblock*nblocks, 
-  Nblock)` where Ng is the number of total grid points combined, Nb 
-  is the size of each block.
-  """
+    Returns
+    -------
+    blocksDecomp : BlocksDecomposition
+      A BlocksDecomposition object containing the information of the blocks.
+
+    Notes
+    -----
+    The output folder will be named as `'Ng{}Nb{}'.format(Nblock*nblocks,
+    Nblock)` where Ng is the number of total grid points combined, Nb
+    is the size of each block.
+    """
 
     # initialize a Blocks object
     Lblock = self.Lbox / nblocks
