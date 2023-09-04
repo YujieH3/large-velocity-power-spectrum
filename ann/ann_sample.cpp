@@ -117,7 +117,7 @@ int main(int argc, char **argv)
 				dists,							// distance (returned)
 				eps);							// error bound
 
-		cout << "\tNN:\tIndex\tDistance\n";			// remove this line, easier to read
+		// cout << "\tNN:\tIndex\tDistance\n";			// remove this line, easier to read
 		for (int i = 0; i < k; i++) {			// print summary
 			dists[i] = sqrt(dists[i]);			// unsquare distance
 			cout << i << "\t" << nnIdx[i] << "\t" << dists[i] << "\n";
