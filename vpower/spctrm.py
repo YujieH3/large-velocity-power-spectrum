@@ -1,7 +1,18 @@
-# The classes defined in this script includes
+#----------------------------------------------------------------------
+#       File:			spctrm.py
+#		Programmer:		Yujie He
+#		Last modified:	22/09/23                # dd/mm/yy
+#		Description:    Functions for power spectrum analysis.
+#----------------------------------------------------------------------
 #
-# - PowerSpectrum
-# - SpectrumList
+#       This file contains functions related to power spectrum 
+#       calculation.
+#
+#       Functions and classes starting with '_' are for intrinsic use 
+#       only. 
+#
+#----------------------------------------------------------------------
+
 
 import numpy as np
 import matplotlib.pyplot as plt

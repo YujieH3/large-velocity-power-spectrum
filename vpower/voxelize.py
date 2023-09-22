@@ -1,8 +1,23 @@
+#----------------------------------------------------------------------
+#       File:			voxelize.py
+#		Programmer:		Yujie He
+#		Last modified:	22/09/23                # dd/mm/yy
+#		Description:    Voxelize extension for interpolation methods.
+#----------------------------------------------------------------------
+#
+#       This file monkey patches the SimulationParticles class in
+#       vpower.interp to add interpolation methods using Voxelize.
+#
+#       Functions and classes starting with '_' are for intrinsic use 
+#       only. 
+#
+#----------------------------------------------------------------------
+
+
 import numpy as np
 import time
 
 from voxelize import Voxelize
-
 Voxelize.__init__(self=Voxelize, use_gpu=False, network_dir=None)  # type: ignore
 
 from vpower.interp import (

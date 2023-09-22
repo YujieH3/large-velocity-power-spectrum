@@ -1,20 +1,17 @@
-# The classes defined in this script includes
+#----------------------------------------------------------------------
+#		File:			interp.py
+#		Programmer:		Yujie He
+#		Last modified:	22/09/23                # dd/mm/yy
+#		Description:	Functions for interpolation.
+#----------------------------------------------------------------------
 #
-# - SimulationField3D
-# - FoldedField3D
-# - BlocksDecomposition
-#   - _BlockField3D
-# - SimulationParticles
+#       This file contains functions related to interpolation.
 #
+#       Functions and classes starting with '_' are for intrinsic use 
+#       only. 
+#
+#----------------------------------------------------------------------
 
-# Note an example of pyFFTW workflow here
-# ```
-# a = pyfftw.empty_aligned((4, 4, 4), dtype='complex128')
-# fft_object = pyfftw.FFTW(a, a, axes=(0, 1, 2))
-# fx = fft_object(fx)
-# ```
-
-#
 # For I/O
 import pickle
 import h5py
@@ -35,8 +32,8 @@ from vpower.spctrm import PowerSpectrum
 
 # For plotting
 import matplotlib.pyplot as plt
+# plt.style.use("niceplot2jay.mplstyle")
 
-plt.style.use("niceplot2jay.mplstyle")
 from matplotlib.colors import LogNorm
 
 # For performance measurement
@@ -94,8 +91,7 @@ class SimulationParticles:
     def data(self) -> tuple:
         return self.pos, self.mass, self.density, self.v
 
-    def shift_to_origin(self) -> None:
-        # Shift coordinates to begin at (0,0,0)
+    def shift_to_origin(self) -> None:                     # Shift coordinates to begin at (0,0,0)
         xmin = np.min(self.pos[:, 0])
         ymin = np.min(self.pos[:, 1])
         zmin = np.min(self.pos[:, 2])
@@ -103,29 +99,22 @@ class SimulationParticles:
         self.pos[:, 1] -= ymin
         self.pos[:, 2] -= zmin
 
-    def remove_bulk_velocity(self) -> None:
-        # - center of mass velocity
+    def remove_bulk_velocity(self) -> None:                # - center of mass velocity
         M = np.sum(self.mass)
         self.v[:, 0] -= np.sum(self.mass * self.v[:, 0]) / M
         self.v[:, 1] -= np.sum(self.mass * self.v[:, 1]) / M
         self.v[:, 2] -= np.sum(self.mass * self.v[:, 2]) / M
 
-    def rho(self, smoothing_rate=1.0):
-        # fixed mass, decrease rho, increase V -> larger particles
-        rho = (
-            self.density / smoothing_rate ** 3
-        )  # Change smoothing length while keeping mass constant
+    def rho(self, smoothing_rate=1.0):                     # fixed mass, decrease rho, increase V -> larger particles
+        rho = (self.density / smoothing_rate ** 3)         # Change smoothing length while keeping mass constant
         return rho
 
-    def h(self, smoothing_rate=1.0):
-        # fixed mass, decrease rho, increase V -> larger particles
-        rho = (
-            self.density / smoothing_rate ** 3
-        )  # Change smoothing length while keeping mass constant
-        V = self.mass / rho  # volume = mass / density
+    def h(self, smoothing_rate=1.0):                      
+        rho = (self.density / smoothing_rate ** 3)         # Change smoothing length while keeping mass constant
+        V = self.mass / rho                                # volume = mass / density
         h = ((3 * V) / (4 * np.pi)) ** (
             1 / 3
-        )  # Smoothing length h = particle radius * smooth_rate
+        )                                                  # Smoothing length h = particle radius * smooth_rate
         return h
 
     def interp_to_field(
@@ -149,15 +138,14 @@ class SimulationParticles:
 
         Lcell = self.Lbox / Nsize
         if auto_padding is True:
-            upper_padding = np.max(self.pos - self.Lbox)  # 3 components
-            lower_padding = np.max(0 - self.pos)  # 3 components
-            Lpad = np.max((upper_padding, lower_padding))  # max in 6 values of 6 sides
+            Lpad = np.max(
+                (np.max(self.pos - self.Lbox),      # 3 components : padding length of 3 upper boundaries
+                 np.max(0 - self.pos))              # 3 components : padding length of 3 lower boundaries
+                )                                   # maximize over 6 values corresponds to 6 sides in the box
             Lpadded = self.Lbox + 2 * Lpad
-            Npadded = Nsize + 2 * int(Lpad / Lcell)
-            pos_padded = (
-                self.pos + Lpad
-            )  # move to the center and avoid negative coordinates for deposit_to_grid()
-            # Use padded in histogram creation, but not in query points
+            Npadded = Nsize + 2 * int(Lpad / Lcell) # Use padded length (Lpadded) or resolution (Npadded) in histogram creation, but not in query points
+            pos_padded = (self.pos + Lpad)          # move to the center and avoid negative coordinates for deposit_to_grid()
+            
             print(
                 "Padding complete. Padded box length: {},"
                 " Padded box size: {}".format(Lpadded, Npadded)
@@ -168,61 +156,52 @@ class SimulationParticles:
             pos_padded = self.pos
             print("Box length: {}, box size: {}".format(Lpadded, Npadded))
 
-        # Interpolation
-        # Step 1, histogram deposition
-        t1 = time.perf_counter()
-        # vec = [vx*rho, vy*rho, vz*rho, rho] -> [(vx*rho)_i, (vy*rho)_i, (vz*rho)_i, rho_i]
-        # Shape of vec is (Nsize, Nsize, Nsize, 4)
-        vec = np.stack(
-            (
-                self.v[:, 0] * self.density,
+        t1 = time.perf_counter() # TEMPORARY RUNTIME COUNTER
+
+        vec = np.stack(                            # vec = [vx*rho, vy*rho, vz*rho, rho]
+            (                                      
+                self.v[:, 0] * self.density,       # vectorize as much as possible
                 self.v[:, 1] * self.density,
                 self.v[:, 2] * self.density,
                 self.density,
             ),
             axis=1,
-        )  # vectorize as much as possible to save time
+        )                                          # shape of vec is (number of particles, 4)
+
         vec_histgrid = deposit_to_grid(
             f=vec, pos=pos_padded, Nsize=Npadded, Lbox=Lpadded
-        )  # issue: possible overbound
-        vec_hist_pts = np.reshape(vec_histgrid, (Npadded ** 3, 4))
-        # directly reshape to (Npadded**3, 4) would produce wrong results
-        filter = [vec_hist_pts[:, 3] > 0]
-        vec_hist_pts = vec_hist_pts[
-            tuple(filter)
-        ]  # field values of non-zero data points
-
+        )  # ISSUE: POSSIBLE OVERBOUND
+        vec_hist_pts = np.reshape(vec_histgrid, (Npadded ** 3, 4))  # directly reshape to (Npadded**3, 4) would produce wrong results
+        
+        filter = tuple([vec_hist_pts[:, 3] > 0])   # this filter selects non-zero density
+        vec_hist_pts = vec_hist_pts[filter]        # get the rho-v vectors for non-empty cells for deposition after ANN
         data_pos = make_grid_coords(Lbox=Lpadded, Nsize=Npadded)
-        data_pos = data_pos[tuple(filter)]  # coordinates of non-zero data points
+        data_pos = data_pos[filter]                # select coordinates of non-empty cells for ANN
 
         if auto_padding is True:
-            data_pos -= Lpad  # return coordinates to its true value
+            data_pos -= Lpad                       
 
-        t = time.perf_counter() - t1
+        t = time.perf_counter() - t1 # TEMPORARY RUNTIME COUNTER
         print("Histogram deposition done. Time taken: {:.2f} s".format(t))
 
-        # Step 2, ANN interpolation
-        # vec_grid = ann_to_grid(f=vec_hist_pts, Nsize=_Nsize, file=output_file)
-        vec_grid = ann_interpolate(
-            data_pos=data_pos,
+        vec_grid = ann_interpolate(                # now run ANN to find the nearest neighbor for each query cell
+            data_pos=data_pos,                     # and link the rho-v vectors to the query cells
             f=vec_hist_pts,
-            Lbox=self.Lbox,
+            Lbox=self.Lbox,                        # grid is created within the function
             Nsize=Nsize,
             eps=eps,
             query_pos=None,
-            data_file=data_file,
+            data_file=data_file, # AVOID R/W BY ADDING PYTHON BINDING TO ANN
             query_file=query_file,
             output_file=output_file,
         )
 
-        v_grid, m_grid = _vec_to_vm_grid(vec_grid=vec_grid, Lcell=Lcell)
+        v_grid, m_grid = _vec_to_vm_grid(vec_grid=vec_grid, Lcell=Lcell)  # translate rho-v vectors to velocity and mass fields. or density fields if future required
 
-        # Log
-        t = time.perf_counter() - t0
+        t = time.perf_counter() - t0 # TEMPORARY RUNTIME COUNTER
         print("Interpolation done. Time elapsed: {:.2f} s".format(t))
 
-        # Create Field object
-        simField3D = SimulationField3D(v_grid, m_grid, Lbox=self.Lbox, Nsize=Nsize)
+        simField3D = SimulationField3D(v_grid, m_grid, Lbox=self.Lbox, Nsize=Nsize) # create a SimulationField3D object to store the interpolated field
 
         return simField3D
 
@@ -267,13 +246,12 @@ class SimulationParticles:
 
         pos = self.pos
         h = self.h(smoothing_rate=smoothing_rate)
-        for r in range(nblocks):  # 0, 1, 2, ..., Nblock-1
-            for s in range(nblocks):  # Nblock*Lbox_blk=Lbox
+        for r in range(nblocks):                                # 0, 1, 2, ..., Nblock-1
+            for s in range(nblocks):                            # Nblock * Lbox_blk = Lbox
                 for t in range(nblocks):
-                    # Potential problem: particles on the corner just outside the box with
-                    # no part in the block might be included.
-                    selection = (
-                        (pos[:, 0] + h >= r * Lblock)
+
+                    selection = (                               # Potential problem: particles on the corner just outside the box with
+                        (pos[:, 0] + h >= r * Lblock)           # no part in the block might be included.
                         & (pos[:, 0] - h < (r + 1) * Lblock)
                         & (pos[:, 1] + h >= s * Lblock)
                         & (pos[:, 1] - h < (s + 1) * Lblock)
@@ -283,18 +261,16 @@ class SimulationParticles:
 
                     blockParticles = self[selection]
                     blockParticles.Lbox = Lblock
-                    # Shift origin to the lower left corner of the block (not including margin)
-                    blockParticles.pos[:, 0] -= r * Lblock
+                    blockParticles.pos[:, 0] -= r * Lblock      # Shift origin to the lower left corner of the block (not including margin)
                     blockParticles.pos[:, 1] -= s * Lblock
                     blockParticles.pos[:, 2] -= t * Lblock
 
                     subField = blockParticles.interp_to_field(
                         Nsize=Nblock, eps=eps, auto_padding=True
-                    )  # return a padded and trimmed field.
+                    )                                           # return a padded and trimmed field.
 
-                    # Create a BlockField3D object and save for later use
-                    blockField = blocksDecomp._BlockField3D(
-                        v=subField.v(),
+                    blockField = blocksDecomp._BlockField3D(    # Create a BlockField3D object and save for later use
+                        v=subField.get_v(),
                         mass=subField.mass,
                         Lblock=Lblock,
                         Nblock=Nblock,
@@ -304,7 +280,7 @@ class SimulationParticles:
                     )
                     blockField.save_field(
                         run_output_dir
-                    )  # save to run_output_dir/block_field_posXXX.pkl
+                    )                                           # save to run_output_dir/block_field_posXXX.pkl
 
         return blocksDecomp
 
@@ -339,9 +315,9 @@ class SimulationParticles:
 
         f = h5py.File(file, "r")
         coordinates = f["PartType0"]["Coordinates"][:]  # type:ignore
-        masses = f["PartType0"]["Masses"][:]  # type:ignore
-        density = f["PartType0"]["Density"][:]  # type:ignore
-        velocities = f["PartType0"]["Velocities"][:]  # type:ignore
+        masses = f["PartType0"]["Masses"][:]            # type:ignore
+        density = f["PartType0"]["Density"][:]          # type:ignore
+        velocities = f["PartType0"]["Velocities"][:]    # type:ignore
         f.close()
 
         simParticles = SimulationParticles(
@@ -378,24 +354,28 @@ class SimulationParticles:
 
 class SimulationField3D:
     def __init__(self, v, mass, Lbox, Nsize) -> None:
+        
         # Essential information for power spectrum computation
-        self.Lbox = Lbox
-        self.Nsize = Nsize
-        self.Lcell = Lbox / float(Nsize)
+        
+        self.Lbox = Lbox                          # box length in length unit
+        self.Nsize = Nsize                        # box size in number of cells (resolution)
+        self.Lcell = Lbox / float(Nsize)          # cell length in length unit
+        
         # Main data
-        self.vx = v[:, :, :, 0]
+        
+        self.vx = v[:, :, :, 0]                   # stores a velocity field
         self.vy = v[:, :, :, 1]
         self.vz = v[:, :, :, 2]
-        self.mass = mass
+        self.mass = mass                          # and a density field
 
-    def v(self) -> np.ndarray:
+    def get_v(self) -> np.ndarray:                # use a method instead of attribute to avoid unnecessary memory usage
         v = np.stack((self.vx, self.vy, self.vz), axis=3)
         return v
 
-    def density(self) -> np.ndarray:
-        return self.mass / self.Lcell ** 3
+    def get_density(self) -> np.ndarray:          
+        return self.mass / self.Lcell ** 3        # use a method instead of attribute to avoid unnecessary memory usage
 
-    def data(self) -> np.ndarray:
+    def get_data(self) -> np.ndarray:
         data = np.stack((self.vx, self.vy, self.vz, self.mass), axis=3)
         return data
 
@@ -497,8 +477,8 @@ class SimulationField3D:
             beta, totalNsize=self.Nsize, Nphase=self.Nsize, x0=0, y0=0, z0=0
         )
         if quantity == "velocity":
-            phi = _apply_phase(self.v(), phase)
-            phi = _fold_field(phi, m)
+            phi = _apply_phase(self.get_v(), phase)
+            phi = fold_field(phi, m)
             phi /= m ** 1.5
             return FoldedField3D(phi, m, beta, self.Lbox / m, self.Nsize // m)
         else:
@@ -517,10 +497,10 @@ class SimulationField3D:
 
     def down_sample(self, n) -> None:
         """ Down sample mass and velocity fields. """
-        new_px = _down_sample(self.vx * self.mass, n)
-        new_py = _down_sample(self.vy * self.mass, n)
-        new_pz = _down_sample(self.vz * self.mass, n)
-        self.mass = _down_sample(self.mass, n)
+        new_px = down_sample(self.vx * self.mass, n)
+        new_py = down_sample(self.vy * self.mass, n)
+        new_pz = down_sample(self.vz * self.mass, n)
+        self.mass = down_sample(self.mass, n)
         self.mass[np.where(self.mass == 0)] = 1e-10  # avoid zero mass
         # update velocity
         self.vx = new_px / self.mass
@@ -561,11 +541,11 @@ class SimulationField3D:
 
         # Get the density slice
         if axis == 0:
-            density_slice_nHcgs = self.density()[index, :, :] * 300
+            density_slice_nHcgs = self.get_density()[index, :, :] * 300
         elif axis == 1:
-            density_slice_nHcgs = self.density()[:, index, :] * 300
+            density_slice_nHcgs = self.get_density()[:, index, :] * 300
         elif axis == 2:
-            density_slice_nHcgs = self.density()[:, :, index] * 300
+            density_slice_nHcgs = self.get_density()[:, :, index] * 300
         else:
             raise Exception(
                 """Unrecognized axis index.
@@ -752,8 +732,8 @@ class BlocksDecomposition:
                 z0=self.t * self.Nsize,
             )
             if quantity == "velocity":
-                phi = _apply_phase(self.v(), phase)
-                phi = _fold_field(phi, m)
+                phi = _apply_phase(self.get_v(), phase)
+                phi = fold_field(phi, m)
                 return FoldedField3D(phi, m, beta, self.Lbox / m, self.Nsize // m)
             else:
                 raise Exception("""Unsupported physical quantity name.""")
@@ -829,7 +809,7 @@ class BlocksDecomposition:
                             y0=s * block_field.Nsize,
                             z0=t * block_field.Nsize,
                         )
-                        f = _apply_phase(f=block_field.v(), phase=phase)
+                        f = _apply_phase(f=block_field.get_v(), phase=phase)
                         foldedField3D.f[
                             (r % u) * Nresult // u : (r % u + 1) * Nresult // u,
                             (s % u) * Nresult // u : (s % u + 1) * Nresult // u,
@@ -865,9 +845,7 @@ def _vec_to_vm_grid(vec_grid, Lcell):
   interp_field.
   """
     # Extract mass from vec_grid
-    rho_grid = vec_grid[
-        :, :, :, 3
-    ]  # Is this problematic in histogram? pho = pho1+pho2?
+    rho_grid = vec_grid[:, :, :, 3]
     m_grid = rho_grid * Lcell ** 3
 
     # Avoid divide by zero before extracting velocity from vec_grid.
@@ -1110,7 +1088,7 @@ def ann_interpolate(
 
     # Read the ANN output and deposit the grids
     t0 = time.perf_counter()
-    f_grid = ann_to_grid(f, Nsize, file=output_file)
+    f_grid = read_ann_to_grid(f, Nsize, file=output_file)
     print("ANN output read. Time taken: {:.2f} s".format(time.perf_counter() - t0))
 
     return f_grid
@@ -1201,9 +1179,9 @@ def ann_run(
     print("Approximate Nearest Neighbour complete. Time taken: {:.2f} s.".format(t))
 
 
-def ann_to_grid(f, Nsize, file):
+def read_ann_to_grid(f, Nsize, file):
     """
-  Using the approximate nearest neighbor output to interpolate some quantity 
+  Read the approximate nearest neighbor output to interpolate some quantity 
   (e.g. mass, velocity, etc.) at data points to query points.
 
   The output.save is organized in the following form:
@@ -1218,16 +1196,14 @@ def ann_to_grid(f, Nsize, file):
   [ 0.    0.    0.332847]
   [ 1.     15.    0.35775 ]]
   """
-    # Read data from output.save
-    ann_save = np.loadtxt(file, delimiter="\t")
+    ann_save = np.loadtxt(file, delimiter="\t")    # Read data from output.save
     index = np.array(ann_save[:, 1], dtype=int)
 
-    # transfer particle-wise data to a data cube
-    if np.ndim(f) == 1:  # scalar data
-        data_grid = f[index]
+    if np.ndim(f) == 1:                            # scalar field
+        data_grid = f[index]                       # correlate data to query positions
         data_grid = np.reshape(data_grid, (Nsize, Nsize, Nsize))
-    elif np.ndim(f) == 2:  # vector data
-        data_grid = f[index, :]
+    elif np.ndim(f) == 2:                          # vector field
+        data_grid = f[index, :]                    # correlate data to query positions
         data_grid = np.reshape(data_grid, (Nsize, Nsize, Nsize, f.shape[1]))
     else:
         raise Exception("Unsupported data shape.")
@@ -1293,8 +1269,8 @@ def _get_phase(beta, totalNsize, Nphase, x0, y0, z0) -> np.ndarray:
     return phase
 
 
-def _fold_field(f, m):
-    if m == 1:  # m==1 means no folding
+def fold_field(f, m):
+    if m == 1:                              # m==1 means no folding
         return f
 
     nx = f.shape[0]
@@ -1303,6 +1279,7 @@ def _fold_field(f, m):
     nx1 = nx // m
     ny1 = ny // m
     nz1 = nz // m
+
     r = 0.0
     for i in range(m):
         for j in range(m):
@@ -1320,8 +1297,8 @@ def _fold_field(f, m):
     return r
 
 
-def _down_sample(r, n):
-    if n == 1:  # n==1 means no downsampling
+def down_sample(r, n):
+    if n == 1:                  # n==1 means no downsampling
         return r
 
     d = 0.0
@@ -1329,31 +1306,43 @@ def _down_sample(r, n):
         for j in range(n):
             for k in range(n):
                 d = d + r[i::n, j::n, k::n, :]
-    # for smoothing density field, needs to average the cell densities
-    d /= n ** 3
+    
+    d /= n ** 3                 # for smoothing density field, needs to average the cell densities
     return d
 
 
-def check_conservation(simParticles, simField3D):
+def check_conservation(simParticles, simField3D) -> None:
     """Check mass, momentum, energy conservation before and after interpolation.
   """
 
-    # Print mass before and after interpolation
-    mass_0 = simParticles.total_mass()
+    mass_0 = simParticles.total_mass()                  # mass
     mass_interpolated = simField3D.total_mass()
-    print("Total mass of particles: {:.3g}".format(mass_0))
+    print("Total mass of particles: {:.3e}".format(mass_0))
     print("Total mass after interpolation: {:.3e}".format(mass_interpolated))
-
-    # Print momentum before and after interpolation
-    momentum_0 = simParticles.total_momentum()
+    print("Total mass restored by {:.3%}".format(
+        mass_interpolated / mass_0                      # +/- means over/underestimation
+        )
+    ) 
+    print("\n")
+    momentum_0 = simParticles.total_momentum()          # momentum
     momentum_interpolated = simField3D.total_momentum()
-    print("Total momentum of particles:", momentum_0)
+    print("Total momentum of particles:", momentum_0)   # momentum is a vector 
     print("Total momentum after interpolation:", momentum_interpolated)
-
-    # Print energy before and after interpolation
-    energy_0 = simParticles.total_kinetic_energy()
+    print("Total momentum restored by ({:.3%}, {:.3%}, {:.3%})".format(
+        momentum_interpolated[0] / momentum_0[0],       # relative difference of each component
+        momentum_interpolated[1] / momentum_0[1],
+        momentum_interpolated[2] / momentum_0[2]
+        )
+    )
+    print("\n")
+    energy_0 = simParticles.total_kinetic_energy()      # kinetic energy 
     energy_interpolated = simField3D.total_kinetic_energy()
-    print("Total kinetic energy of particles: {:.3g}".format(energy_0))
-    print(
-        "Total kinetic energy after interpolation: {:.3e}".format(energy_interpolated)
+    print("Total kinetic energy of particles: {:.3e}".format(energy_0))
+    print("Total kinetic energy after interpolation: {:.3e}".format(
+        energy_interpolated
+        )
+    )
+    print("Total kinetic energy restored by {:.3%}".format(
+        energy_interpolated / energy_0
+        )
     )
