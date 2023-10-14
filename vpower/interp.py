@@ -158,12 +158,12 @@ class SimulationParticles:
 
         t1 = time.perf_counter() # TEMPORARY RUNTIME COUNTER
 
-        vec = np.stack(                            # vec = [vx*rho, vy*rho, vz*rho, rho]
+        vec = np.stack(                            # vec = [vx*m, vy*m, vz*m, m]
             (                                      
-                self.v[:, 0] * self.density,       # vectorize as much as possible
-                self.v[:, 1] * self.density,
-                self.v[:, 2] * self.density,
-                self.density,
+                self.v[:, 0] * self.mass,       # vectorize as much as possible
+                self.v[:, 1] * self.mass,
+                self.v[:, 2] * self.mass,
+                self.mass,
             ),
             axis=1,
         )                                          # shape of vec is (number of particles, 4)
@@ -172,7 +172,9 @@ class SimulationParticles:
             f=vec, pos=pos_padded, Nsize=Npadded, Lbox=Lpadded
         )  # ISSUE: POSSIBLE OVERBOUND
         vec_hist_pts = np.reshape(vec_histgrid, (Npadded ** 3, 4))  # directly reshape to (Npadded**3, 4) would produce wrong results
-        
+        vec_hist_pts /= (self.Lbox / Nsize)**3
+                # now vec = [vx*rho, vy*rho, vz*rho, rho] 
+
         filter = tuple([vec_hist_pts[:, 3] > 0])   # this filter selects non-zero density
         vec_hist_pts = vec_hist_pts[filter]        # get the rho-v vectors for non-empty cells for deposition after ANN
         data_pos = make_grid_coords(Lbox=Lpadded, Nsize=Npadded)
