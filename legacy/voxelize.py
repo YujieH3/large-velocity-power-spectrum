@@ -1,7 +1,7 @@
 #----------------------------------------------------------------------
 #       File:			voxelize.py
 #		Programmer:		Yujie He
-#		Last modified:	15/10/23                # dd/mm/yy
+#		Last modified:	22/09/23                # dd/mm/yy
 #		Description:    Voxelize extension for interpolation methods.
 #----------------------------------------------------------------------
 #
@@ -28,8 +28,7 @@ from vpower.interp import (
 )
 
 
-def voxelize_interp_to_field(self, Nsize, smoothing_rate=1.0, auto_padding=True,
-                             edge_removal=False):
+def voxelize_interp_to_field(self, Nsize, smoothing_rate=1.0, auto_padding=True):
     """Interpolate velocity using Voxelize by v = (m*v)_i/m_i.
 
     Issue
@@ -75,15 +74,8 @@ def voxelize_interp_to_field(self, Nsize, smoothing_rate=1.0, auto_padding=True,
     # Interpolation
     # vec = [vx*rho, vy*rho, vz*rho, rho] -> [(vx*rho)_i, (vy*rho)_i, (vz*rho)_i, rho_i]
     vec = np.stack(
-        (
-            self.v[:, 0] * rho, 
-            self.v[:, 1] * rho, 
-            self.v[:, 2] * rho, 
-            rho, 
-            np.ones(len(self))
-        ), axis=1
+        (self.v[:, 0] * rho, self.v[:, 1] * rho, self.v[:, 2] * rho, rho), axis=1
     )
-
     vec_grid = Voxelize.__call__(
         self=Voxelize,
         box_L=_Lbox,  # type: ignore
@@ -91,12 +83,8 @@ def voxelize_interp_to_field(self, Nsize, smoothing_rate=1.0, auto_padding=True,
         radii=h,
         field=vec,
         box=_Nsize,
-    )                                                   # Run Voxelize
-
-    if edge_removal is True:
-        vec_grid[vec_grid[:,:,:,4] < 0.7] = 0           # Remove cells not completely covered by particles
-
-    v_grid, m_grid = _vec_to_vm_grid(vec_grid=vec_grid[:,:,:,:4], Lcell=Lcell) # first four columns
+    )
+    v_grid, m_grid = _vec_to_vm_grid(vec_grid=vec_grid, Lcell=Lcell)
 
     # Log
     t = time.perf_counter() - t0
