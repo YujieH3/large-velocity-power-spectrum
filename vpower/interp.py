@@ -1,7 +1,7 @@
 #----------------------------------------------------------------------
 #		File:			interp.py
 #		Programmer:		Yujie He
-#		Last modified:	22/09/23                # dd/mm/yy
+#		Last modified:	29/10/23                # dd/mm/yy
 #		Description:	Functions for interpolation.
 #----------------------------------------------------------------------
 #
@@ -88,8 +88,10 @@ class SimulationParticles:
             self.Lbox,
         )
 
-    def data(self) -> tuple:
-        return self.pos, self.mass, self.density, self.v
+    def get_data(self) -> np.ndarray:
+        """ All data in a single array of shape [Nparticles, 8]. If you need complex
+         manipulation of the data, drop the object and use the numpy array instead. """
+        return np.concatenate((self.pos, self.mass, self.density, self.v), axis=1)
 
     def shift_to_origin(self) -> None:                     # Shift coordinates to begin at (0,0,0)
         xmin = np.min(self.pos[:, 0])
@@ -117,26 +119,21 @@ class SimulationParticles:
         )                                                  # Smoothing length h = particle radius * smooth_rate
         return h
 
-    def interp_to_field(
-        self,
-        Nsize,
-        eps=0.0,
+    def ann_interp_to_field(
+        self, Nsize, eps=0.0,
         auto_padding=False,
         data_file="data.pts",
         query_file="query.pts",
         output_file="ann_output.save",
+        overwrite=True
     ):
-        """ Interpolate velocity using a 3d histogram + ANN. 
-    
-    Note
-    ----
-
-
+        """ Interpolate velocity using ANN. 
     """
         t0 = time.perf_counter()
         print("Interpolating velocity field...")
 
         Lcell = self.Lbox / Nsize
+
         if auto_padding is True:
             Lpad = np.max(
                 (np.max(self.pos - self.Lbox),      # 3 components : padding length of 3 upper boundaries
@@ -144,7 +141,6 @@ class SimulationParticles:
                 )                                   # maximize over 6 values corresponds to 6 sides in the box
             Lpadded = self.Lbox + 2 * Lpad
             Npadded = Nsize + 2 * int(Lpad / Lcell) # Use padded length (Lpadded) or resolution (Npadded) in histogram creation, but not in query points
-            pos_padded = (self.pos + Lpad)          # move to the center and avoid negative coordinates for deposit_to_grid()
             
             print(
                 "Padding complete. Padded box length: {},"
@@ -153,57 +149,44 @@ class SimulationParticles:
         else:
             Lpadded = self.Lbox
             Npadded = Nsize
-            pos_padded = self.pos
             print("Box length: {}, box size: {}".format(Lpadded, Npadded))
 
         t1 = time.perf_counter() # TEMPORARY RUNTIME COUNTER
 
-        vec = np.stack(                            # vec = [vx*m, vy*m, vz*m, m]
+        vec = np.stack(                            # vec = [vx*, vy*, vz*, ]
             (                                      
-                self.v[:, 0] * self.mass,       # vectorize as much as possible
-                self.v[:, 1] * self.mass,
-                self.v[:, 2] * self.mass,
-                self.mass,
+                self.v[:, 0] * self.density,       # vectorize as much as possible
+                self.v[:, 1] * self.density,
+                self.v[:, 2] * self.density,
+                self.density,
             ),
             axis=1,
-        )                                          # shape of vec is (number of particles, 4)
+        )                                          # shape of vec is (number of particles, 4)                    
 
-        vec_histgrid = deposit_to_grid(
-            f=vec, pos=pos_padded, Nsize=Npadded, Lbox=Lpadded
-        )  # ISSUE: POSSIBLE OVERBOUND
-        vec_hist_pts = np.reshape(vec_histgrid, (Npadded ** 3, 4))  # directly reshape to (Npadded**3, 4) would produce wrong results
-        vec_hist_pts /= (self.Lbox / Nsize)**3
-                # now vec = [vx*rho, vy*rho, vz*rho, rho] 
-
-        filter = tuple([vec_hist_pts[:, 3] > 0])   # this filter selects non-zero density
-        vec_hist_pts = vec_hist_pts[filter]        # get the rho-v vectors for non-empty cells for deposition after ANN
-        data_pos = make_grid_coords(Lbox=Lpadded, Nsize=Npadded)
-        data_pos = data_pos[filter]                # select coordinates of non-empty cells for ANN
-
-        if auto_padding is True:
-            data_pos -= Lpad                       
-
-        t = time.perf_counter() - t1 # TEMPORARY RUNTIME COUNTER
-        print("Histogram deposition done. Time taken: {:.2f} s".format(t))
+        query_pos = make_grid_coords(Lbox=self.Lbox, Nsize=Nsize)
 
         vec_grid = ann_interpolate(                # now run ANN to find the nearest neighbor for each query cell
-            data_pos=data_pos,                     # and link the rho-v vectors to the query cells
-            f=vec_hist_pts,
-            Lbox=self.Lbox,                        # grid is created within the function
+            data_pos=self.pos,                     # and link the rho-v vectors to the query cells
+            query_pos=query_pos,
+            f=vec,
             Nsize=Nsize,
             eps=eps,
-            query_pos=None,
             data_file=data_file, # AVOID R/W BY ADDING PYTHON BINDING TO ANN
             query_file=query_file,
             output_file=output_file,
+            overwrite=overwrite
         )
 
-        v_grid, m_grid = _vec_to_vm_grid(vec_grid=vec_grid, Lcell=Lcell)  # translate rho-v vectors to velocity and mass fields. or density fields if future required
+        if auto_padding is True:
+            vec_grid = vec_grid[:Nsize, :Nsize, :Nsize, :]
+
+        v_grid = vec_grid[..., :3] / vec_grid[..., 3, None]     # divide by mass
+        m_grid = vec_grid[..., 3] * Lcell**3                    # mass
 
         t = time.perf_counter() - t0 # TEMPORARY RUNTIME COUNTER
         print("Interpolation done. Time elapsed: {:.2f} s".format(t))
 
-        simField3D = SimulationField3D(v_grid, m_grid, Lbox=self.Lbox, Nsize=Nsize) # create a SimulationField3D object to store the interpolated field
+        simField3D = SimulationField3D(v_grid, m_grid, Lcell=Lcell) # create a SimulationField3D object to store the interpolated field
 
         return simField3D
 
@@ -355,20 +338,30 @@ class SimulationParticles:
 
 
 class SimulationField3D:
-    def __init__(self, v, mass, Lbox, Nsize) -> None:
+    def __init__(self, v, mass, Lcell) -> None:
         
         # Essential information for power spectrum computation
-        
-        self.Lbox = Lbox                          # box length in length unit
-        self.Nsize = Nsize                        # box size in number of cells (resolution)
-        self.Lcell = Lbox / float(Nsize)          # cell length in length unit
-        
+        self.Lcell = Lcell                     # cell length in length unit
+
         # Main data
-        
-        self.vx = v[:, :, :, 0]                   # stores a velocity field
-        self.vy = v[:, :, :, 1]
-        self.vz = v[:, :, :, 2]
-        self.mass = mass                          # and a density field
+        self.vx = v[..., 0]                         # stores a velocity field
+        self.vy = v[..., 1]
+        self.vz = v[..., 2]
+        self.mass = mass                            # and a mass (density) field
+
+        # Essential information for power spectrum computation
+        self.Nsize = len(self.mass)
+        self.Lbox = self.Nsize * self.Lcell
+
+
+    def __getitem__(self, index):
+        return SimulationField3D(self.get_v()[index], self.mass[index], self.Lcell)
+    
+    def __array__(self):
+        return self.get_data()
+
+    def __array_wrap__(self, arr):         # data array like ouput of get_data(), [vx, vy, vz, m]
+        return SimulationField3D(arr[..., :3], arr[..., :3], self.Lcell)
 
     def get_v(self) -> np.ndarray:                # use a method instead of attribute to avoid unnecessary memory usage
         v = np.stack((self.vx, self.vy, self.vz), axis=3)
@@ -378,8 +371,9 @@ class SimulationField3D:
         return self.mass / self.Lcell ** 3        # use a method instead of attribute to avoid unnecessary memory usage
 
     def get_data(self) -> np.ndarray:
-        data = np.stack((self.vx, self.vy, self.vz, self.mass), axis=3)
-        return data
+        """ All data in a single array of shape [Nsize, Nsize, Nsize, 8]. If you need complex
+         manipulation of the data, drop the object and use the numpy array instead. """
+        return np.stack((self.vx, self.vy, self.vz, self.mass), axis=3)
 
     def velocity_power(
         self,
@@ -717,7 +711,7 @@ class BlocksDecomposition:
 
     class _BlockField3D(SimulationField3D):
         def __init__(self, v, mass, Lblock, Nblock, r, s, t) -> None:
-            super().__init__(v, mass, Lbox=Lblock, Nsize=Nblock)
+            super().__init__(v, mass, Lcell=Lblock/Nblock)
             self.r = r
             self.s = s
             self.t = t
@@ -1054,11 +1048,10 @@ def deposit_to_grid(
 
 def ann_interpolate(
     data_pos,
+    query_pos,
     f,
-    Lbox,
     Nsize,
     eps,
-    query_pos=None,
     data_file="data.pts",
     query_file="query.pts",
     output_file="ann_output.save",
@@ -1067,26 +1060,35 @@ def ann_interpolate(
 
     t0 = time.perf_counter()
     # Prepare data.pts
-    save_ann_pts(data_pos, file=data_file)
-    print("Data file saved. Time taken: {:.2f} s".format(time.perf_counter() - t0))
+    if not os.path.isfile(data_file) or overwrite is True:  # set overwrite true when testing.
+        save_ann_pts(data_pos, file=data_file)
+        print("Data file saved. Time taken: {:.2f} s".format(time.perf_counter() - t0))
+    elif os.path.isfile(data_file):
+        print("Data file found.")
+    else:
+        raise Exception("Unrecognized data file status.")
 
     t0 = time.perf_counter()
     # Prepare query.pts if not existed
-    if overwrite is True:  # set overwrite true when testing.
-        if query_pos is None:
-            query_pos = make_grid_coords(Lbox=Lbox, Nsize=Nsize)
-        save_ann_pts(
-            query_pos, file=query_file
-        )  # prepare the grids to be interpolated, save as
+    if not os.path.isfile(query_file) or overwrite is True:
+        save_ann_pts(query_pos, file=query_file)  # prepare the grids to be interpolated, save as
         print("Query file saved. "
               "Time taken: {:.2f} s".format(time.perf_counter() - t0))
-    else:
+    elif os.path.isfile(query_file):
         print("Query file found.")
+    else:
+        raise Exception("Unrecognized query file status.")
 
-    # Run approximate nearest neighbor
-    maxpts = len(data_pos)  
-    # set maximum number of data points to the exact number of data points
-    ann_run(eps=eps, maxpts=maxpts)  # call the ann library through command line
+    if not os.path.isfile(output_file) or overwrite is True:
+        # Run approximate nearest neighbor
+        maxpts = len(data_pos)  
+        # set maximum number of data points to the exact number of data points
+        ann_run(eps=eps, maxpts=maxpts, 
+                data_file=data_file, query_file=query_file, output_file=output_file)  # call the ann library through command line
+    elif os.path.isfile(output_file):
+        print("ANN output found.")
+    else:
+        raise Exception("Unrecognized ANN output status.")
 
     # Read the ANN output and deposit the grids
     t0 = time.perf_counter()
@@ -1191,7 +1193,8 @@ def read_ann_to_grid(f, Nsize, file):
   second column: index of the data point
   third column: distance between the data point and the query point
   
-  save is of shape (query points number*k, 3)
+  save is of shape (query points number*k, 3). The three columns are No. x 
+  nearest neighbor, index of the neighbor in data points, and distance.
   e.g.
   [[ 0.    5.    0.249455]
   [ 1.    4.    0.26852 ]

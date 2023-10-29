@@ -48,9 +48,8 @@ def voxelize_interp_to_field(self, Nsize, smoothing_rate=1.0, auto_padding=True,
     if auto_padding is True:
         # Calculate the length that particles exceed the box on each side.
         # The calculation is vectorized.
-        hhh = np.stack((h, h, h), axis=1)
-        upper_padding = np.max(self.pos + hhh - self.Lbox, axis=0)
-        lower_padding = np.max(hhh - self.pos, axis=0)
+        upper_padding = np.max(self.pos + h[..., None] - self.Lbox)
+        lower_padding = np.max(h[..., None] - self.pos)
 
         # Because Voxelize assumes periodic boundary condition, the padding can be
         # only half of the maximum padding
@@ -59,44 +58,55 @@ def voxelize_interp_to_field(self, Nsize, smoothing_rate=1.0, auto_padding=True,
         if padding < 0:
             padding = 0  # keep the box size larger than specified
 
-        _Lbox = self.Lbox + 2 * padding
-        _pos = self.pos
-        _Nsize = Nsize + 2 * int(padding / Lcell)
-        print("Padding: ", padding, "Lbox: ", _Lbox, "Nsize: ", _Nsize)
+        _Lbox_ = self.Lbox + 2 * padding
+        _pos_ = self.pos
+        _Nsize_ = Nsize + 2 * int(padding / Lcell)
+        print("Padding: ", padding, "Lbox: ", _Lbox_, "Nsize: ", _Nsize_)
 
         # Log
         t = time.perf_counter() - t0
         print("Auto padding done. Time elapsed: {:.2f} s".format(t))
     else:
-        _Lbox = self.Lbox
-        _pos = self.pos
-        _Nsize = Nsize
+        _Lbox_ = self.Lbox
+        _pos_ = self.pos
+        _Nsize_ = Nsize
 
     # Interpolation
     # vec = [vx*rho, vy*rho, vz*rho, rho] -> [(vx*rho)_i, (vy*rho)_i, (vz*rho)_i, rho_i]
-    vec = np.stack(
-        (
-            self.v[:, 0] * rho, 
-            self.v[:, 1] * rho, 
-            self.v[:, 2] * rho, 
-            rho, 
-            np.ones(len(self))
-        ), axis=1
-    )
+    if edge_removal is True:
+        vec = np.stack(
+            (
+                self.v[:, 0] * rho, 
+                self.v[:, 1] * rho, 
+                self.v[:, 2] * rho, 
+                rho, 
+                np.ones(len(self))
+            ), axis=1
+        )
+    else:
+        vec = np.stack(
+            (
+                self.v[:, 0] * rho, 
+                self.v[:, 1] * rho, 
+                self.v[:, 2] * rho, 
+                rho
+            ), axis=1
+        )
 
     vec_grid = Voxelize.__call__(
         self=Voxelize,
-        box_L=_Lbox,  # type: ignore
-        coords=_pos,
+        box_L=_Lbox_,  # type: ignore
+        coords=_pos_,
         radii=h,
         field=vec,
-        box=_Nsize,
+        box=_Nsize_,
     )                                                   # Run Voxelize
 
     if edge_removal is True:
-        vec_grid[vec_grid[:,:,:,4] < 0.7] = 0           # Remove cells not completely covered by particles
+        vec_grid[vec_grid[..., 4] < 0.7] = 0           # Remove cells not completely covered by particles
 
-    v_grid, m_grid = _vec_to_vm_grid(vec_grid=vec_grid[:,:,:,:4], Lcell=Lcell) # first four columns
+    v_grid = vec_grid[..., :3] / vec_grid[..., 3, None]     # divide by mass
+    m_grid = vec_grid[..., 3] * Lcell**3                    # mass
 
     # Log
     t = time.perf_counter() - t0
@@ -189,7 +199,7 @@ def voxelize_interp_to_blocks(
                 )
                 blockField.save_field(
                     run_output_dir
-                )  # save to run_output_dir/block_field_posXXX.pkl
+                )  # save to run_output_dir/block_field_pos_XXX.pkl
 
     return blocksDecomp
 
