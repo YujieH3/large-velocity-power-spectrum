@@ -117,7 +117,7 @@ def voxelize_interp_to_field(self, Nsize, smoothing_rate=1.0, auto_padding=True,
         m_grid = m_grid[:Nsize, :Nsize, :Nsize]
 
     # Create Field object
-    simField3D = SimulationField3D(v_grid, m_grid, Lbox=self.Lbox, Nsize=Nsize)
+    simField3D = SimulationField3D(v_grid, m_grid, Lcell=Lcell)
 
     return simField3D
 

@@ -1,0 +1,84 @@
+Only the CPU-only flavour of Voxelize is available!
+Nsize:  64 radii_threshold:  1.0 density_threshold_percentile:  5.0
+Interpolating velocity field...
+Padding:  0.035411309549151726 Lbox:  1.0708226190983035 Nsize:  68
+Auto padding done. Time elapsed: 0.49 s
+Interpolation done. Time elapsed: 2.11 s
+Interpolating velocity field...
+Box length: 1.0, box size: 64
+Data file saved. Time taken: 33.94 s
+Query file saved. Time taken: 0.85 s
+Approximate Nearest Neighbour complete. Time taken: 21.84 s.
+ANN output read. Time taken: 0.11 s
+Interpolation done. Time elapsed: 57.85 s
+Total mass of particles: 1.260e-03
+Total mass after interpolation: 1.229e-03
+Total mass restored by 97.550%
+
+
+Total momentum of particles: [ 0.16640169  0.2250191  -0.00676618]
+Total momentum after interpolation: [ 0.16228217  0.2194889  -0.00658927]
+Total momentum restored by (97.524%, 97.542%, 97.385%)
+
+
+Total kinetic energy of particles: 3.141e+01
+Total kinetic energy after interpolation: 3.062e+01
+Total kinetic energy restored by 97.481%
+Done in 66.48838960984722 s
+
+Only the CPU-only flavour of Voxelize is available!
+Nsize:  64 radii_threshold:  1.0 density_threshold_percentile:  10.0
+Interpolating velocity field...
+Padding:  0.035411309549151726 Lbox:  1.0708226190983035 Nsize:  68
+Auto padding done. Time elapsed: 0.49 s
+Interpolation done. Time elapsed: 2.16 s
+Interpolating velocity field...
+Box length: 1.0, box size: 64
+Data file saved. Time taken: 34.04 s
+Query file saved. Time taken: 0.87 s
+Approximate Nearest Neighbour complete. Time taken: 21.81 s.
+ANN output read. Time taken: 0.11 s
+Interpolation done. Time elapsed: 57.71 s
+Total mass of particles: 1.260e-03
+Total mass after interpolation: 1.230e-03
+Total mass restored by 97.660%
+
+
+Total momentum of particles: [ 0.16640169  0.2250191  -0.00676618]
+Total momentum after interpolation: [ 0.16248549  0.21974278 -0.00658758]
+Total momentum restored by (97.647%, 97.655%, 97.360%)
+
+
+Total kinetic energy of particles: 3.141e+01
+Total kinetic energy after interpolation: 3.066e+01
+Total kinetic energy restored by 97.606%
+Done in 61.27720506116748 s
+
+Only the CPU-only flavour of Voxelize is available!
+Nsize:  64 radii_threshold:  1.0 density_threshold_percentile:  15.0
+Interpolating velocity field...
+Padding:  0.035411309549151726 Lbox:  1.0708226190983035 Nsize:  68
+Auto padding done. Time elapsed: 0.49 s
+Interpolation done. Time elapsed: 2.08 s
+Interpolating velocity field...
+Box length: 1.0, box size: 64
+Data file saved. Time taken: 34.05 s
+Query file saved. Time taken: 0.86 s
+Approximate Nearest Neighbour complete. Time taken: 21.82 s.
+ANN output read. Time taken: 0.11 s
+Interpolation done. Time elapsed: 57.69 s
+Total mass of particles: 1.260e-03
+Total mass after interpolation: 1.231e-03
+Total mass restored by 97.720%
+
+
+Total momentum of particles: [ 0.16640169  0.2250191  -0.00676618]
+Total momentum after interpolation: [ 0.16259603  0.21988164 -0.0065862 ]
+Total momentum restored by (97.713%, 97.717%, 97.340%)
+
+
+Total kinetic energy of particles: 3.141e+01
+Total kinetic energy after interpolation: 3.068e+01
+Total kinetic energy restored by 97.674%
+Done in 61.16448950394988 s
+
