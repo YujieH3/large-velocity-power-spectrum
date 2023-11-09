@@ -32,9 +32,8 @@ from vpower.spctrm import PowerSpectrum
 
 # For plotting
 import matplotlib.pyplot as plt
-# plt.style.use("niceplot2jay.mplstyle")
-
 from matplotlib.colors import LogNorm
+# plt.style.use("niceplot2jay.mplstyle")
 
 # For performance measurement
 import time
@@ -335,6 +334,11 @@ class SimulationParticles:
         return 0.5 * np.sum(
             self.mass * (self.v[:, 0] ** 2 + self.v[:, 1] ** 2 + self.v[:, 2] ** 2)
         )
+    
+    def specific_kinetic_energy(self) -> float:
+        """ Compute the specific kinetic energy of the particles by total
+        kinetic energy divided by total mass."""
+        return self.total_kinetic_energy() / self.total_mass()
 
 
 class SimulationField3D:
@@ -511,7 +515,7 @@ class SimulationField3D:
         return E
 
     def specific_kinetic_energy(self) -> float:
-        E = 0.5 * np.mean(self.vx ** 2 + self.vy ** 2 + self.vz ** 2)
+        E = self.total_kinetic_energy() / self.total_mass()
         return E
 
     def total_kinetic_energy(self) -> float:
@@ -1316,38 +1320,54 @@ def down_sample(r, n):
     return d
 
 
-def check_conservation(simParticles, simField3D) -> None:
+def check_conservation(simParticles, simField3D) -> tuple:
     """Check mass, momentum, energy conservation before and after interpolation.
   """
 
     mass_0 = simParticles.total_mass()                  # mass
     mass_interpolated = simField3D.total_mass()
+    mass_conservation = mass_interpolated / mass_0
     print("Total mass of particles: {:.3e}".format(mass_0))
     print("Total mass after interpolation: {:.3e}".format(mass_interpolated))
-    print("Total mass restored by {:.3%}".format(
-        mass_interpolated / mass_0                      # +/- means over/underestimation
-        )
+    print("Total mass restored by {:.3%}".format(mass_conservation)
     ) 
     print("\n")
     momentum_0 = simParticles.total_momentum()          # momentum
     momentum_interpolated = simField3D.total_momentum()
+    momentum_conservation = momentum_interpolated / momentum_0
     print("Total momentum of particles:", momentum_0)   # momentum is a vector 
     print("Total momentum after interpolation:", momentum_interpolated)
     print("Total momentum restored by ({:.3%}, {:.3%}, {:.3%})".format(
-        momentum_interpolated[0] / momentum_0[0],       # relative difference of each component
-        momentum_interpolated[1] / momentum_0[1],
-        momentum_interpolated[2] / momentum_0[2]
+        momentum_conservation[0],       # relative difference of each component
+        momentum_conservation[1],
+        momentum_conservation[2]
         )
     )
     print("\n")
     energy_0 = simParticles.total_kinetic_energy()      # kinetic energy 
     energy_interpolated = simField3D.total_kinetic_energy()
+    energy_conservation = energy_interpolated / energy_0
     print("Total kinetic energy of particles: {:.3e}".format(energy_0))
     print("Total kinetic energy after interpolation: {:.3e}".format(
         energy_interpolated
         )
     )
     print("Total kinetic energy restored by {:.3%}".format(
-        energy_interpolated / energy_0
+        energy_conservation
         )
     )
+    print("\n")
+    specific_energy_0 = simParticles.specific_kinetic_energy()      # specific energy
+    specific_energy_interpolated = simField3D.specific_kinetic_energy()
+    specific_energy_conservation = specific_energy_interpolated / specific_energy_0
+    print("Specific kinetic energy of particles: {:.3e}".format(specific_energy_0))
+    print("Specific kinetic energy after interpolation: {:.3e}".format(
+        specific_energy_interpolated
+        )
+    )
+    print("Specific kinetic energy restored by {:.3%}".format(
+        specific_energy_conservation
+        )
+    )
+
+    return mass_conservation, momentum_conservation, energy_conservation, specific_energy_conservation
