@@ -5,7 +5,8 @@
 #		Description:	Functions for interpolation.
 #----------------------------------------------------------------------
 #
-#       This file contains functions related to interpolation.
+#       This file contains functions related to interpolation and also
+#       FFT computation.
 #
 #       Functions and classes starting with '_' are for intrinsic use 
 #       only. 
@@ -26,6 +27,9 @@ import warnings
 import subprocess
 import numpy as np
 import pyfftw
+
+from voxelize import Voxelize
+Voxelize.__init__(self=Voxelize, use_gpu=False, network_dir=None)  # type: ignore
 
 pyfftw.interfaces.cache.enable()
 from vpower.spctrm import PowerSpectrum
@@ -68,12 +72,15 @@ def init_dir(run_output_dir, auto_overwrite=False):
 
 class SimulationParticles:
     def __init__(self, pos, mass, density, velocity, Lbox) -> None:
-        self.pos = pos                     # coordinate data of shape [Nparticles, 3]
-        self.mass = mass                   # mass data of shape [Nparticles]
-        self.density = density             # density data of shape [Nparticles]
-        self.v = self.velocity = velocity  # velocity data of shape [Nparticles, 3]
-        self.Lbox = Lbox                   # box size is given in creation
-        self.r = self.h()                  # radii is smoothing length with rate = 1.0
+        self.pos      = pos       # coordinate data of shape [Nparticles, 3]
+        self.mass     = mass      # mass data of shape [Nparticles]
+        self.density  = density   # density data of shape [Nparticles]
+        self.velocity = velocity  # velocity data of shape [Nparticles, 3]
+        self.Lbox     = Lbox      # box size is given in creation
+
+        # Aliases
+        self.r = self.h()         # radii is smoothing length with rate = 1.0
+        self.v = self.velocity
 
     def __len__(self) -> int:
         return len(self.pos)
@@ -118,76 +125,164 @@ class SimulationParticles:
         )                                                  # Smoothing length h = particle radius * smooth_rate
         return h
 
-    def ann_interp_to_field(
-        self, Nsize, eps=0.0,
-        auto_padding=False,
-        data_file="data.pts",
-        query_file="query.pts",
-        output_file="ann_output.save",
-        overwrite=True
-    ):
-        """ Interpolate velocity using ANN. 
-    """
-        t0 = time.perf_counter()
-        print("Interpolating velocity field...")
+    def density_velocity_vector(self):
+        """ Return a vector of shape [Nparticles, 4] containing 
+        [vx*rho, vy*rho, vz*rho, rho]. Both ANN and voxelize use this vector.
+        Interpolation operation assign this vector on a regular grid and then """
 
-        Lcell = self.Lbox / Nsize
-
-        if auto_padding is True:
-            Lpad = np.max(
-                (np.max(self.pos - self.Lbox),      # 3 components : padding length of 3 upper boundaries
-                 np.max(0 - self.pos))              # 3 components : padding length of 3 lower boundaries
-                )                                   # maximize over 6 values corresponds to 6 sides in the box
-            Lpadded = self.Lbox + 2 * Lpad
-            Npadded = Nsize + 2 * int(Lpad / Lcell) # Use padded length (Lpadded) or resolution (Npadded) in histogram creation, but not in query points
-            
-            print(
-                "Padding complete. Padded box length: {},"
-                " Padded box size: {}".format(Lpadded, Npadded)
-            )
-        else:
-            Lpadded = self.Lbox
-            Npadded = Nsize
-            print("Box length: {}, box size: {}".format(Lpadded, Npadded))
-
-        t1 = time.perf_counter() # TEMPORARY RUNTIME COUNTER
-
-        vec = np.stack(                            # vec = [vx*, vy*, vz*, ]
+        vec = np.stack(                            
             (                                      
-                self.v[:, 0] * self.density,       # vectorize as much as possible
+                self.v[:, 0] * self.density,
                 self.v[:, 1] * self.density,
                 self.v[:, 2] * self.density,
                 self.density,
             ),
             axis=1,
-        )                                          # shape of vec is (number of particles, 4)                    
+        )    
+        return vec      
 
-        query_pos = make_grid_coords(Lbox=self.Lbox, Nsize=Nsize)
 
-        vec_grid = ann_interpolate(                # now run ANN to find the nearest neighbor for each query cell
-            data_pos=self.pos,                     # and link the rho-v vectors to the query cells
-            query_pos=query_pos,
-            f=vec,
-            Nsize=Nsize,
-            eps=eps,
-            data_file=data_file, # AVOID R/W BY ADDING PYTHON BINDING TO ANN
-            query_file=query_file,
-            output_file=output_file,
-            overwrite=overwrite
+    def ann_padding_length(self, Nsize):
+        """ For ANN, pad up to the gas particle closet to each sides. And to 
+        avoid dealing with rectangles we take the maximum of padding on six sides
+        and pad all sides uniformly."""
+        Lcell = self.Lbox / Nsize
+        Lpad = np.max(
+            (
+                np.max(self.pos - self.Lbox), # padding length of 3 upper boundaries
+                np.max(0 - self.pos)          # padding length of 3 lower boundaries
+            )      
+        ) # maximize over 6 values corresponds to 6 sides in the box
+        __Lbox__ = self.Lbox + 2 * Lpad
+        __Nsize__ = Nsize + 2 * int(Lpad / Lcell)
+        
+        return __Lbox__, __Nsize__
+
+    def voxelize_padding_length(self, Nsize, smoothing_rate=1.0):
+        """ For voxelize, pad up to the length that particles exceed the box 
+        on each side. And to avoid dealing with rectangles we take the maximum 
+        of padding on six sides and pad all sides uniformly.
+        
+        Note that the effect of particles outside of the box is automatically counted"""
+
+        Lcell = self.Lbox / Nsize
+        h = self.h(smoothing_rate=smoothing_rate)
+        
+        # Calculate the length that particles exceed the box on each side.
+        # The calculation is vectorized.
+
+        upper_insideout = np.max(self.pos + h[..., None] - self.Lbox)
+        lower_insideout = np.max(h[..., None] - self.pos)
+        Lpad = np.max((upper_insideout, lower_insideout)) / 2
+
+        # Because Voxelize assumes periodic boundary condition, the padding can be
+        # only half of the maximum padding
+
+        if Lpad < 0:
+            Lpad = 0  # keep the box size larger than specified
+
+        __Lbox__ = self.Lbox + 2 * Lpad
+        __Nsize__ = Nsize + 2 * int(Lpad / Lcell)
+        return __Lbox__, __Nsize__
+
+
+    def ann_interp_to_field(
+        self, 
+        Nsize, 
+        eps          = 0.0,
+        auto_padding = False,
+        data_file    = "data.pts",
+        query_file   = "query.pts",
+        output_file  = "ann_output.save",
+        overwrite    = True
+    ):
+        """ Interpolate velocity using ANN. 
+    """
+        Lcell = self.Lbox / Nsize
+
+        if auto_padding is True:
+            __Lbox__, __Nsize__ = self.ann_padding_length(Nsize)
+        else:
+            __Lbox__  = self.Lbox
+            __Nsize__ = Nsize
+        print("Box length: {}, box size: {}".format(__Lbox__, __Nsize__))
+
+        vec_grid = ann_interpolate(    # now run ANN
+            data_pos    = self.pos,    # and link the rho-v vectors to the query cells
+            query_pos   = make_grid_coords(Lbox=__Lbox__, Nsize=__Nsize__),
+            f           = self.density_velocity_vector(),
+            Nsize       = Nsize,
+            eps         = eps,
+            data_file   = data_file,   # AVOID R/W BY ADDING PYTHON BINDING TO ANN
+            query_file  = query_file,
+            output_file = output_file,
+            overwrite   = overwrite
         )
 
         if auto_padding is True:
-            vec_grid = vec_grid[:Nsize, :Nsize, :Nsize, :]
-
+            vec_grid = vec_grid[:Nsize, :Nsize, :Nsize, :] # trim the padded cells
         v_grid = vec_grid[..., :3] / vec_grid[..., 3, None]     # divide by mass
         m_grid = vec_grid[..., 3] * Lcell**3                    # mass
-
-        t = time.perf_counter() - t0 # TEMPORARY RUNTIME COUNTER
-        print("Interpolation done. Time elapsed: {:.2f} s".format(t))
 
         simField3D = SimulationField3D(v_grid, m_grid, Lcell=Lcell) # create a SimulationField3D object to store the interpolated field
 
         return simField3D
+
+
+    def voxelize_interp_to_field(self, Nsize, smoothing_rate=1.0, auto_padding=True,
+                                edge_removal=False):
+        """Interpolate velocity using Voxelize by v = (m*v)_i/m_i.
+
+        Issue
+        -----
+        - voxelize could cause the edge of a particle/cloud to fall off.
+        Velocity here won't have this issue when we need only the divided
+        value where the momentum and mass fall-off could cancel out.
+        """
+        Lcell = self.Lbox / Nsize
+        h = self.h(smoothing_rate=smoothing_rate)
+        rho = self.rho(smoothing_rate=smoothing_rate)
+
+        if auto_padding is True:
+            __Lbox__, __Nsize__ = self.voxelize_padding_length(
+                                        Nsize, 
+                                        smoothing_rate
+                                    )
+        else:
+            __Lbox__  = self.Lbox
+            __Nsize__ = Nsize
+        print("Lbox: ", __Lbox__, "Nsize: ", __Nsize__)
+
+        # Interpolation
+        # vec = [vx*rho, vy*rho, vz*rho, rho] -> [(vx*rho)_i, (vy*rho)_i, (vz*rho)_i, rho_i]
+        vec = self.density_velocity_vector()
+        if edge_removal is True:
+            vec = np.stack((vec, np.ones(len(self))), axis=1)
+
+        vec_grid = Voxelize.__call__(
+            self   = Voxelize,
+            box_L  = __Lbox__,   # type: ignore
+            coords = self.pos,
+            radii  = h,
+            field  = vec,
+            box    = __Nsize__,
+        )                                                   # Run Voxelize
+
+        if edge_removal is True:
+            vec_grid[vec_grid[..., 4] < 0.7] = 0           # Remove cells not completely covered by particles
+
+        v_grid = vec_grid[..., :3] / vec_grid[..., 3, None]     # divide by mass
+        m_grid = vec_grid[..., 3] * Lcell**3                    # mass
+
+        if auto_padding is True:
+            v_grid = v_grid[:Nsize, :Nsize, :Nsize, :]
+            m_grid = m_grid[:Nsize, :Nsize, :Nsize]
+
+        # Create Field object
+        simField3D = SimulationField3D(v_grid, m_grid, Lcell=Lcell)
+
+        return simField3D
+    
 
     def interp_to_blocks(
         self, run_output_dir, nblocks, Nblock, eps, smoothing_rate=1.0

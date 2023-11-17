@@ -121,7 +121,6 @@ def voxelize_interp_to_field(self, Nsize, smoothing_rate=1.0, auto_padding=True,
 
     return simField3D
 
-
 def voxelize_interp_to_blocks(
     self, run_output_dir, nblocks, Nblock, smoothing_rate=1.0
 ):

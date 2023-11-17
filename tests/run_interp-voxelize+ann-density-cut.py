@@ -41,7 +41,7 @@ if radii_threshold > 0.0:
 else:
     # ANN Interpolation for all input particles
     outputField = inputParticles.ann_interp_to_field(Nsize=Nsize, overwrite=True)
-    dt = time.perf_counter() - t0
+dt = time.perf_counter() - t0
 
 # No need for the plot. Just check conservation.
 from vpower.interp import check_conservation
