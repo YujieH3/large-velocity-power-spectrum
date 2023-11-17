@@ -141,29 +141,14 @@ class SimulationParticles:
         )    
         return vec      
 
-
-    def ann_padding_length(self, Nsize):
-        """ For ANN, pad up to the gas particle closet to each sides. And to 
-        avoid dealing with rectangles we take the maximum of padding on six sides
-        and pad all sides uniformly."""
-        Lcell = self.Lbox / Nsize
-        Lpad = np.max(
-            (
-                np.max(self.pos - self.Lbox), # padding length of 3 upper boundaries
-                np.max(0 - self.pos)          # padding length of 3 lower boundaries
-            )      
-        ) # maximize over 6 values corresponds to 6 sides in the box
-        __Lbox__ = self.Lbox + 2 * Lpad
-        __Nsize__ = Nsize + 2 * int(Lpad / Lcell)
-        
-        return __Lbox__, __Nsize__
-
     def voxelize_padding_length(self, Nsize, smoothing_rate=1.0):
         """ For voxelize, pad up to the length that particles exceed the box 
         on each side. And to avoid dealing with rectangles we take the maximum 
         of padding on six sides and pad all sides uniformly.
         
-        Note that the effect of particles outside of the box is automatically counted"""
+        Note that the effect of 'particles outside of the box sticking in' is
+        also counted, because any particles outside will be enclosed by padded
+        box under this condition."""
 
         Lcell = self.Lbox / Nsize
         h = self.h(smoothing_rate=smoothing_rate)
@@ -171,9 +156,9 @@ class SimulationParticles:
         # Calculate the length that particles exceed the box on each side.
         # The calculation is vectorized.
 
-        upper_insideout = np.max(self.pos + h[..., None] - self.Lbox)
-        lower_insideout = np.max(h[..., None] - self.pos)
-        Lpad = np.max((upper_insideout, lower_insideout)) / 2
+        upper_pad = np.max(self.pos + h[..., None] - self.Lbox)
+        lower_pad = np.max(h[..., None] - self.pos)
+        Lpad = np.max((upper_pad, lower_pad)) / 2
 
         # Because Voxelize assumes periodic boundary condition, the padding can be
         # only half of the maximum padding
@@ -190,26 +175,23 @@ class SimulationParticles:
         self, 
         Nsize, 
         eps          = 0.0,
-        auto_padding = False,
         data_file    = "data.pts",
         query_file   = "query.pts",
         output_file  = "ann_output.save",
         overwrite    = True
     ):
-        """ Interpolate velocity using ANN. 
-    """
-        Lcell = self.Lbox / Nsize
+        """ Interpolate velocity using ANN. This method is wrapped around 
+        `ann_interpolate()` and should be the one called directly when using
+        ANN interpolation.
 
-        if auto_padding is True:
-            __Lbox__, __Nsize__ = self.ann_padding_length(Nsize)
-        else:
-            __Lbox__  = self.Lbox
-            __Nsize__ = Nsize
-        print("Box length: {}, box size: {}".format(__Lbox__, __Nsize__))
+        ANN does not need padding. Particles outside of box (if any) are counted
+        directly and it does not enforce any boundary condition, unlike voxelize.
+        """
+        Lcell = self.Lbox / Nsize
 
         vec_grid = ann_interpolate(    # now run ANN
             data_pos    = self.pos,    # and link the rho-v vectors to the query cells
-            query_pos   = make_grid_coords(Lbox=__Lbox__, Nsize=__Nsize__),
+            query_pos   = make_grid_coords(Lbox=self.Lbox, Nsize=Nsize),
             f           = self.density_velocity_vector(),
             Nsize       = Nsize,
             eps         = eps,
@@ -219,8 +201,6 @@ class SimulationParticles:
             overwrite   = overwrite
         )
 
-        if auto_padding is True:
-            vec_grid = vec_grid[:Nsize, :Nsize, :Nsize, :] # trim the padded cells
         v_grid = vec_grid[..., :3] / vec_grid[..., 3, None]     # divide by mass
         m_grid = vec_grid[..., 3] * Lcell**3                    # mass
 
@@ -229,8 +209,12 @@ class SimulationParticles:
         return simField3D
 
 
-    def voxelize_interp_to_field(self, Nsize, smoothing_rate=1.0, auto_padding=True,
-                                edge_removal=False):
+    def voxelize_interp_to_field(
+            self, 
+            Nsize, 
+            smoothing_rate = 1.0,
+            padding        = True,
+            edge_removal   = False):
         """Interpolate velocity using Voxelize by v = (m*v)_i/m_i.
 
         Issue
@@ -240,10 +224,8 @@ class SimulationParticles:
         value where the momentum and mass fall-off could cancel out.
         """
         Lcell = self.Lbox / Nsize
-        h = self.h(smoothing_rate=smoothing_rate)
-        rho = self.rho(smoothing_rate=smoothing_rate)
 
-        if auto_padding is True:
+        if padding is True:
             __Lbox__, __Nsize__ = self.voxelize_padding_length(
                                         Nsize, 
                                         smoothing_rate
@@ -251,35 +233,35 @@ class SimulationParticles:
         else:
             __Lbox__  = self.Lbox
             __Nsize__ = Nsize
-        print("Lbox: ", __Lbox__, "Nsize: ", __Nsize__)
+        print("Padded Lbox: ", __Lbox__, "Nsize: ", __Nsize__)
 
-        # Interpolation
-        # vec = [vx*rho, vy*rho, vz*rho, rho] -> [(vx*rho)_i, (vy*rho)_i, (vz*rho)_i, rho_i]
-        vec = self.density_velocity_vector()
-        if edge_removal is True:
-            vec = np.stack((vec, np.ones(len(self))), axis=1)
+        # Pulls data
+        rhov_vec = self.density_velocity_vector()
+
+        if edge_removal:
+            rhov_vec = np.stack((rhov_vec, np.ones(len(self))), axis=1)
 
         vec_grid = Voxelize.__call__(
             self   = Voxelize,
             box_L  = __Lbox__,   # type: ignore
             coords = self.pos,
-            radii  = h,
-            field  = vec,
+            radii  = self.h(smoothing_rate),
+            field  = rhov_vec,
             box    = __Nsize__,
         )                                                   # Run Voxelize
 
-        if edge_removal is True:
-            vec_grid[vec_grid[..., 4] < 0.7] = 0           # Remove cells not completely covered by particles
+        if edge_removal:
+            vec_grid[vec_grid[..., 4] < edge_removal] = 0           # Remove cells not completely covered by particles
 
         v_grid = vec_grid[..., :3] / vec_grid[..., 3, None]     # divide by mass
         m_grid = vec_grid[..., 3] * Lcell**3                    # mass
 
-        if auto_padding is True:
+        if padding is True:
             v_grid = v_grid[:Nsize, :Nsize, :Nsize, :]
             m_grid = m_grid[:Nsize, :Nsize, :Nsize]
 
         # Create Field object
-        simField3D = SimulationField3D(v_grid, m_grid, Lcell=Lcell)
+        simField3D = SimulationField3D(v_grid, m_grid, Lcell)
 
         return simField3D
     

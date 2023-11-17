@@ -1,5 +1,4 @@
 from vpower.interp import SimulationParticles
-import vpower.voxelize
 import numpy as np
 import pandas as pd
 import time

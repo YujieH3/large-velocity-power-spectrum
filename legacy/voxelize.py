@@ -1,7 +1,7 @@
 #----------------------------------------------------------------------
 #       File:			voxelize.py
 #		Programmer:		Yujie He
-#		Last modified:	22/09/23                # dd/mm/yy
+#		Last modified:	15/10/23                # dd/mm/yy
 #		Description:    Voxelize extension for interpolation methods.
 #----------------------------------------------------------------------
 #
@@ -23,82 +23,8 @@ Voxelize.__init__(self=Voxelize, use_gpu=False, network_dir=None)  # type: ignor
 from vpower.interp import (
     SimulationField3D,
     SimulationParticles,
-    _vec_to_vm_grid,
     BlocksDecomposition,
 )
-
-
-def voxelize_interp_to_field(self, Nsize, smoothing_rate=1.0, auto_padding=True):
-    """Interpolate velocity using Voxelize by v = (m*v)_i/m_i.
-
-    Issue
-    -----
-      - voxelize could cause the edge of a particle/cloud to fall off.
-      Velocity here won't have this issue when we need only the divided
-      value where the momentum and mass fall-off could cancel out.
-    """
-    t0 = time.perf_counter()
-    print("Interpolating velocity field...")
-
-    Lcell = self.Lbox / Nsize
-    h = self.h(smoothing_rate=smoothing_rate)
-    rho = self.rho(smoothing_rate=smoothing_rate)
-
-    if auto_padding is True:
-        # Calculate the length that particles exceed the box on each side.
-        # The calculation is vectorized.
-        hhh = np.stack((h, h, h), axis=1)
-        upper_padding = np.max(self.pos + hhh - self.Lbox, axis=0)
-        lower_padding = np.max(hhh - self.pos, axis=0)
-
-        # Because Voxelize assumes periodic boundary condition, the padding can be
-        # only half of the maximum padding
-        padding = np.max((upper_padding, lower_padding)) / 2
-
-        if padding < 0:
-            padding = 0  # keep the box size larger than specified
-
-        _Lbox = self.Lbox + 2 * padding
-        _pos = self.pos
-        _Nsize = Nsize + 2 * int(padding / Lcell)
-        print("Padding: ", padding, "Lbox: ", _Lbox, "Nsize: ", _Nsize)
-
-        # Log
-        t = time.perf_counter() - t0
-        print("Auto padding done. Time elapsed: {:.2f} s".format(t))
-    else:
-        _Lbox = self.Lbox
-        _pos = self.pos
-        _Nsize = Nsize
-
-    # Interpolation
-    # vec = [vx*rho, vy*rho, vz*rho, rho] -> [(vx*rho)_i, (vy*rho)_i, (vz*rho)_i, rho_i]
-    vec = np.stack(
-        (self.v[:, 0] * rho, self.v[:, 1] * rho, self.v[:, 2] * rho, rho), axis=1
-    )
-    vec_grid = Voxelize.__call__(
-        self=Voxelize,
-        box_L=_Lbox,  # type: ignore
-        coords=_pos,
-        radii=h,
-        field=vec,
-        box=_Nsize,
-    )
-    v_grid, m_grid = _vec_to_vm_grid(vec_grid=vec_grid, Lcell=Lcell)
-
-    # Log
-    t = time.perf_counter() - t0
-    print("Interpolation done. Time elapsed: {:.2f} s".format(t))
-
-    if auto_padding is True:
-        v_grid = v_grid[:Nsize, :Nsize, :Nsize, :]
-        m_grid = m_grid[:Nsize, :Nsize, :Nsize]
-
-    # Create Field object
-    simField3D = SimulationField3D(v_grid, m_grid, Lbox=self.Lbox, Nsize=Nsize)
-
-    return simField3D
-
 
 def voxelize_interp_to_blocks(
     self, run_output_dir, nblocks, Nblock, smoothing_rate=1.0
@@ -177,12 +103,11 @@ def voxelize_interp_to_blocks(
                 )
                 blockField.save_field(
                     run_output_dir
-                )  # save to run_output_dir/block_field_posXXX.pkl
+                )  # save to run_output_dir/block_field_pos_XXX.pkl
 
     return blocksDecomp
 
 
 # Monkey patch Simulation Particles
 SimulationParticles.voxelize_interp_to_field = voxelize_interp_to_field  # type: ignore
-SimulationParticles.voxelize_interp_to_blocks = voxelize_interp_to_blocks  # type: ignore
 # Pylance report an error but this works.
