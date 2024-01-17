@@ -1,6 +1,0 @@
-setup.py
-src/test.cpp
-test_module.egg-info/PKG-INFO
-test_module.egg-info/SOURCES.txt
-test_module.egg-info/dependency_links.txt
-test_module.egg-info/top_level.txt

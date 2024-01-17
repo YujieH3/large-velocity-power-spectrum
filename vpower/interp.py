@@ -1,17 +1,23 @@
-#----------------------------------------------------------------------
-#		File:			interp.py
-#		Programmer:		Yujie He
-#		Last modified:	29/10/23                # dd/mm/yy
-#		Description:	Functions for interpolation.
-#----------------------------------------------------------------------
+#--------------------------------------------------------
+# File:			interp.py
+# Programmer:		Yujie He
+# Last modified:	29/10/23                # dd/mm/yy
+# Description:	Functions for interpolation.
+#--------------------------------------------------------
 #
-#       This file contains functions related to interpolation and also
-#       FFT computation.
+# This file contains functions related to interpolation 
+# and also FFT computation.
+# 
+# This script includes the following classes
+#  - GasParticles
+#  - BoxField
+#  - FoldedBox
+#  - BrickInventory
 #
-#       Functions and classes starting with '_' are for intrinsic use 
-#       only. 
+# Functions and classes starting with '_' are for 
+# intrinsic use only.
 #
-#----------------------------------------------------------------------
+#--------------------------------------------------------
 
 # For I/O
 import pickle
@@ -27,6 +33,7 @@ import warnings
 import subprocess
 import numpy as np
 import pyfftw
+from numba import njit
 
 from voxelize import Voxelize
 Voxelize.__init__(self=Voxelize, use_gpu=False, network_dir=None)  # type: ignore
@@ -42,6 +49,8 @@ from matplotlib.colors import LogNorm
 # For performance measurement
 import time
 from memory_profiler import profile
+
+
 
 
 def init_dir(run_output_dir, auto_overwrite=False):
@@ -70,7 +79,62 @@ def init_dir(run_output_dir, auto_overwrite=False):
     return run_output_dir
 
 
-class SimulationParticles:
+
+
+def load_snapshot(file, Lbox=1.0, 
+                  remove_bulk_velocity=True, 
+                  shift_to_origin=True):
+    """ 
+    Load coordinates, density, masses and velocities from a snapshot to a particles
+    object.
+
+    Parameters
+    ----------
+    file : str
+      The HD5F snapshot file name
+
+    Returns
+    -------
+    gasParticles : GasParticles
+      The Particles object containing the snapshot data. See Particles class for
+      more details. 
+
+    Examples
+    --------
+    ```
+    import utils_data as dt
+    file = '/test/snapshot.hd5f'
+    gasParticles = dt.LoadSnapshot(file)
+    pos = gasParticles.pos
+    mass = gasParticles.mass
+    density = gasParticles.density
+    v = gasParticles.v
+    ```
+    """
+
+    f = h5py.File(file, "r")
+    coordinates = f["PartType0"]["Coordinates"][:]  # type:ignore
+    masses = f["PartType0"]["Masses"][:]            # type:ignore
+    density = f["PartType0"]["Density"][:]          # type:ignore
+    velocities = f["PartType0"]["Velocities"][:]    # type:ignore
+    f.close()
+
+    gasParticles = GasParticles(
+        coordinates, masses, density, velocities, Lbox=Lbox
+    )
+
+    if remove_bulk_velocity is True:
+        gasParticles.remove_bulk_velocity()
+    if shift_to_origin is True:
+        gasParticles.shift_to_origin()
+
+    return gasParticles
+
+
+
+# --------------------1. GAS PARTICLES CLASS---------------------
+class GasParticles:
+
     def __init__(self, pos, mass, density, velocity, Lbox) -> None:
         self.pos      = pos       # coordinate data of shape [Nparticles, 3]
         self.mass     = mass      # mass data of shape [Nparticles]
@@ -82,11 +146,13 @@ class SimulationParticles:
         self.r = self.h()         # radii is smoothing length with rate = 1.0
         self.v = self.velocity
 
+
     def __len__(self) -> int:
         return len(self.pos)
 
+
     def __getitem__(self, index):
-        return SimulationParticles(
+        return GasParticles(
             self.pos[index],
             self.mass[index],
             self.density[index],
@@ -94,10 +160,12 @@ class SimulationParticles:
             self.Lbox,
         )
 
+
     def get_data(self) -> np.ndarray:
         """ All data in a single array of shape [Nparticles, 8]. If you need complex
          manipulation of the data, drop the object and use the numpy array instead. """
         return np.concatenate((self.pos, self.mass, self.density, self.v), axis=1)
+
 
     def shift_to_origin(self) -> None:                     # Shift coordinates to begin at (0,0,0)
         xmin = np.min(self.pos[:, 0])
@@ -107,15 +175,18 @@ class SimulationParticles:
         self.pos[:, 1] -= ymin
         self.pos[:, 2] -= zmin
 
+
     def remove_bulk_velocity(self) -> None:                # - center of mass velocity
         M = np.sum(self.mass)
         self.v[:, 0] -= np.sum(self.mass * self.v[:, 0]) / M
         self.v[:, 1] -= np.sum(self.mass * self.v[:, 1]) / M
         self.v[:, 2] -= np.sum(self.mass * self.v[:, 2]) / M
 
+
     def rho(self, smoothing_rate=1.0):                     # fixed mass, decrease rho, increase V -> larger particles
         rho = (self.density / smoothing_rate ** 3)         # Change smoothing length while keeping mass constant
         return rho
+
 
     def h(self, smoothing_rate=1.0):                      
         rho = (self.density / smoothing_rate ** 3)         # Change smoothing length while keeping mass constant
@@ -124,6 +195,7 @@ class SimulationParticles:
             1 / 3
         )                                                  # Smoothing length h = particle radius * smooth_rate
         return h
+
 
     def density_velocity_vector(self):
         """ Return a vector of shape [Nparticles, 4] containing 
@@ -140,6 +212,7 @@ class SimulationParticles:
             axis=1,
         )    
         return vec      
+
 
     def voxelize_padding_length(self, Nsize, smoothing_rate=1.0):
         """ For voxelize, pad up to the length that particles exceed the box 
@@ -204,9 +277,9 @@ class SimulationParticles:
         v_grid = vec_grid[..., :3] / vec_grid[..., 3, None]     # divide by mass
         m_grid = vec_grid[..., 3] * Lcell**3                    # mass
 
-        simField3D = SimulationField3D(v_grid, m_grid, Lcell=Lcell) # create a SimulationField3D object to store the interpolated field
+        boxField = BoxField(v_grid, m_grid, Lcell=Lcell) # create a BoxField object to store the interpolated field
 
-        return simField3D
+        return boxField
 
 
     def voxelize_interp_to_field(
@@ -261,27 +334,28 @@ class SimulationParticles:
             m_grid = m_grid[:Nsize, :Nsize, :Nsize]
 
         # Create Field object
-        simField3D = SimulationField3D(v_grid, m_grid, Lcell)
+        boxField = BoxField(v_grid, m_grid, Lcell)
 
-        return simField3D
+        return boxField
     
 
-    def interp_to_blocks(
-        self, run_output_dir, nblocks, Nblock, eps, smoothing_rate=1.0
+    #### UPDATE
+    def interp_to_brick(
+        self, run_output_dir, nbrick, Nbrick, eps, smoothing_rate=1.0
     ):
         """
-    Interpolate velocity using Voxelize by v = (m*v)_i/m_i to `nblocks`^3 blocks
-    (`BlockField3D`) of size `Nblock`^3 each and save them to a subfolder of
+    Interpolate velocity using Voxelize by v = (m*v)_i/m_i to `nbrick`^3 brick
+    (`BrickField`) of size `Nbrick`^3 each and save them to a subfolder of
     output_dir.
 
     Parameters
     ----------
     output_dir : str
       Path to the output folder.
-    nblocks : int
-      Number of blocks in each direction.
-    Nblock : int
-      Size of each block in each direction.
+    nbrick : int
+      Number of brick in each direction.
+    Nbrick : int
+      Size of each brick in each direction.
     smoothing_rate : float
       `Smoothing length h = particle radius * smoothing_rate`. This parameter
       only affects the padding length and have no effect on the interpolation
@@ -289,113 +363,68 @@ class SimulationParticles:
 
     Returns
     -------
-    blocksDecomp : BlocksDecomposition
-      A BlocksDecomposition object containing the information of the blocks.
+    brickInventory : BrickInventory
+      A BrickInventory object containing the information of the brick.
     
     Notes
     -----
-    The output folder will be named as `[run_output_dir]Ng[Nblock*nblocks]Nb[Nblock]` 
+    The output folder will be named as `[run_output_dir]Ng[Nbrick*nbrick]Nb[Nbrick]` 
     where Ng is the number of total grid points combined, Nb is the size of each 
-    block.
+    brick.
     """
 
-        # initialize a Blocks object
-        Lblock = self.Lbox / nblocks
-        blocksDecomp = BlocksDecomposition(run_output_dir, nblocks, Nblock, Lblock)
+        # initialize a Brick object
+        Lbrick = self.Lbox / nbrick
+        brickInventory = BrickInventory(run_output_dir, nbrick, Nbrick, Lbrick)
 
-        blocksDecomp.run_output_dir = run_output_dir  # update data_folder attribute
+        brickInventory.run_output_dir = run_output_dir  # update data_folder attribute
 
         pos = self.pos
         h = self.h(smoothing_rate=smoothing_rate)
-        for r in range(nblocks):                                # 0, 1, 2, ..., Nblock-1
-            for s in range(nblocks):                            # Nblock * Lbox_blk = Lbox
-                for t in range(nblocks):
+        for r in range(nbrick):                                # 0, 1, 2, ..., Nbrick-1
+            for s in range(nbrick):                            # Nbrick * Lbox_blk = Lbox
+                for t in range(nbrick):
 
                     selection = (                               # Potential problem: particles on the corner just outside the box with
-                        (pos[:, 0] + h >= r * Lblock)           # no part in the block might be included.
-                        & (pos[:, 0] - h < (r + 1) * Lblock)
-                        & (pos[:, 1] + h >= s * Lblock)
-                        & (pos[:, 1] - h < (s + 1) * Lblock)
-                        & (pos[:, 2] + h >= t * Lblock)
-                        & (pos[:, 2] - h < (t + 1) * Lblock)
+                        (pos[:, 0] + h >= r * Lbrick)           # no part in the brick might be included.
+                        & (pos[:, 0] - h < (r + 1) * Lbrick)
+                        & (pos[:, 1] + h >= s * Lbrick)
+                        & (pos[:, 1] - h < (s + 1) * Lbrick)
+                        & (pos[:, 2] + h >= t * Lbrick)
+                        & (pos[:, 2] - h < (t + 1) * Lbrick)
                     )
 
-                    blockParticles = self[selection]
-                    blockParticles.Lbox = Lblock
-                    blockParticles.pos[:, 0] -= r * Lblock      # Shift origin to the lower left corner of the block (not including margin)
-                    blockParticles.pos[:, 1] -= s * Lblock
-                    blockParticles.pos[:, 2] -= t * Lblock
+                    brickParticles = self[selection]
+                    brickParticles.Lbox = Lbrick
+                    brickParticles.pos[:, 0] -= r * Lbrick      # Shift origin to the lower left corner of the brick (not including margin)
+                    brickParticles.pos[:, 1] -= s * Lbrick
+                    brickParticles.pos[:, 2] -= t * Lbrick
 
-                    subField = blockParticles.interp_to_field(
-                        Nsize=Nblock, eps=eps, auto_padding=True
+                    subField = brickParticles.interp_to_field(
+                        Nsize=Nbrick, eps=eps, auto_padding=True
                     )                                           # return a padded and trimmed field.
 
-                    blockField = blocksDecomp._BlockField3D(    # Create a BlockField3D object and save for later use
+                    brickField = brickInventory._BrickField(    # Create a BrickField object and save for later use
                         v=subField.get_v(),
                         mass=subField.mass,
-                        Lblock=Lblock,
-                        Nblock=Nblock,
+                        Lbrick=Lbrick,
+                        Nbrick=Nbrick,
                         r=r,
                         s=s,
                         t=t,
                     )
-                    blockField.save_field(
+                    brickField.save_field(
                         run_output_dir
-                    )                                           # save to run_output_dir/block_field_posXXX.pkl
+                    )                                           # save to run_output_dir/brick_field_posXXX.pkl
 
-        return blocksDecomp
+        return brickInventory
 
-    @staticmethod
-    def load_snapshot(file, Lbox=1.0, remove_bulk_velocity=True, shift_to_origin=True):
-        """ Load coordinates, density, masses and velocities from a snapshot to a particles
-    object.
-
-    Parameters
-    ----------
-    file : str
-      The HD5F snapshot file name
-
-    Returns
-    -------
-    simParticles : SimulationParticles
-      The Particles object containing the snapshot data. See Particles class for
-      more details. 
-
-    Examples
-    --------
-    ```
-    import utils_data as dt
-    file = '/test/snapshot.hd5f'
-    simParticles = dt.LoadSnapshot(file)
-    pos = simParticles.pos
-    mass = simParticles.mass
-    density = simParticles.density
-    v = simParticles.v
-    ```
-    """
-
-        f = h5py.File(file, "r")
-        coordinates = f["PartType0"]["Coordinates"][:]  # type:ignore
-        masses = f["PartType0"]["Masses"][:]            # type:ignore
-        density = f["PartType0"]["Density"][:]          # type:ignore
-        velocities = f["PartType0"]["Velocities"][:]    # type:ignore
-        f.close()
-
-        simParticles = SimulationParticles(
-            coordinates, masses, density, velocities, Lbox=Lbox
-        )
-
-        if remove_bulk_velocity is True:
-            simParticles.remove_bulk_velocity()
-        if shift_to_origin is True:
-            simParticles.shift_to_origin()
-
-        return simParticles
 
     def total_mass(self) -> float:
         """ Compute the total mass of the particles.
     """
         return np.sum(self.mass)
+
 
     def total_momentum(self) -> np.ndarray:
         """ Compute the total momentum of the particles.
@@ -405,6 +434,7 @@ class SimulationParticles:
         pz = np.sum(self.mass * self.v[:, 2])
         return np.array([px, py, pz])
 
+
     def total_kinetic_energy(self) -> float:
         """ Compute the total kinetic energy of the particles.
     """
@@ -412,13 +442,18 @@ class SimulationParticles:
             self.mass * (self.v[:, 0] ** 2 + self.v[:, 1] ** 2 + self.v[:, 2] ** 2)
         )
     
+
     def specific_kinetic_energy(self) -> float:
         """ Compute the specific kinetic energy of the particles by total
         kinetic energy divided by total mass."""
         return self.total_kinetic_energy() / self.total_mass()
+# -------------------END GAS PARTICLES CLASS---------------------
 
 
-class SimulationField3D:
+
+# ----------------------2. BOX FIELD CLASS-----------------------
+class BoxField:
+
     def __init__(self, v, mass, Lcell) -> None:
         
         # Essential information for power spectrum computation
@@ -436,25 +471,31 @@ class SimulationField3D:
 
 
     def __getitem__(self, index):
-        return SimulationField3D(self.get_v()[index], self.mass[index], self.Lcell)
+        return BoxField(self.get_v()[index], self.mass[index], self.Lcell)
     
+
     def __array__(self):
         return self.get_data()
 
+
     def __array_wrap__(self, arr):         # data array like ouput of get_data(), [vx, vy, vz, m]
-        return SimulationField3D(arr[..., :3], arr[..., :3], self.Lcell)
+        return BoxField(arr[..., :3], arr[..., :3], self.Lcell)
+
 
     def get_v(self) -> np.ndarray:                # use a method instead of attribute to avoid unnecessary memory usage
         v = np.stack((self.vx, self.vy, self.vz), axis=3)
         return v
 
+
     def get_density(self) -> np.ndarray:          
         return self.mass / self.Lcell ** 3        # use a method instead of attribute to avoid unnecessary memory usage
+
 
     def get_data(self) -> np.ndarray:
         """ All data in a single array of shape [Nsize, Nsize, Nsize, 8]. If you need complex
          manipulation of the data, drop the object and use the numpy array instead. """
         return np.stack((self.vx, self.vy, self.vz, self.mass), axis=3)
+
 
     def velocity_power(
         self,
@@ -474,6 +515,7 @@ class SimulationField3D:
             )
         )
         return P
+
 
     def momentum_power(self) -> np.ndarray:
         # momentum grid
@@ -497,6 +539,7 @@ class SimulationField3D:
 
         return P
 
+
     def kinetic_energy_power(self) -> np.ndarray:
         # kinetic energy grid
         E = self.mass * (self.vx ** 2 + self.vy ** 2 + self.vz ** 2)
@@ -511,6 +554,7 @@ class SimulationField3D:
             )
         )
         return P
+
 
     def spctrm(
         self, quantity="velocity", kmin=None, kmax=None, kres=None
@@ -549,6 +593,7 @@ class SimulationField3D:
 
         return spctrm
 
+
     def fold(self, m, beta, quantity="velocity"):  # m is the folding factor
         phase = _get_phase(
             beta, totalNsize=self.Nsize, Nphase=self.Nsize, x0=0, y0=0, z0=0
@@ -557,20 +602,22 @@ class SimulationField3D:
             phi = _apply_phase(self.get_v(), phase)
             phi = fold_field(phi, m)
             phi /= m ** 1.5
-            return FoldedField3D(phi, m, beta, self.Lbox / m, self.Nsize // m)
+            return FoldedBox(phi, m, beta, self.Lbox / m, self.Nsize // m)
         else:
             raise Exception("""Unsupported physical quantity name.""")
 
-    def trim(self, Nmargin, Nblock) -> None:
+
+    def trim(self, Nmargin, Nbrick) -> None:
         n1 = Nmargin
-        n2 = Nmargin + Nblock
+        n2 = Nmargin + Nbrick
         self.vx = self.vx[n1:n2, n1:n2, n1:n2]
         self.vy = self.vy[n1:n2, n1:n2, n1:n2]
         self.vz = self.vz[n1:n2, n1:n2, n1:n2]
         self.mass = self.mass[n1:n2, n1:n2, n1:n2]
         # update params
         self.Nsize = self.Nsize - 2 * Nmargin
-        self.Lbox = self.Lbox * Nblock / (Nblock + 2 * Nmargin)
+        self.Lbox = self.Lbox * Nbrick / (Nbrick + 2 * Nmargin)
+
 
     def down_sample(self, n) -> None:
         """ Down sample mass and velocity fields. """
@@ -587,22 +634,27 @@ class SimulationField3D:
         self.Nsize /= n
         self.Lcell *= n
 
+
     def mean_kinetic_energy(self) -> float:
         E = 0.5 * np.mean(self.mass * (self.vx ** 2 + self.vy ** 2 + self.vz ** 2))
         return E
+
 
     def specific_kinetic_energy(self) -> float:
         E = self.total_kinetic_energy() / self.total_mass()
         return E
 
+
     def total_kinetic_energy(self) -> float:
         E = 0.5 * np.sum(self.mass * (self.vx ** 2 + self.vy ** 2 + self.vz ** 2))
         return E
+
 
     def total_mass(self) -> float:
         """ Compute the total mass of the field.
     """
         return np.sum(self.mass)
+
 
     def total_momentum(self) -> np.ndarray:
         """ Compute the total momentum of the field.
@@ -611,6 +663,7 @@ class SimulationField3D:
         py = np.sum(self.mass * self.vy)
         pz = np.sum(self.mass * self.vz)
         return np.array([px, py, pz])
+
 
     def plot_density_slice(self, index, axis=2, ax=None, **kwargs):
         """ Plot a slice of density field. Convert to nHcgs units.
@@ -633,6 +686,7 @@ class SimulationField3D:
         plot_density2d(
             density_slice_nHcgs, Lbox=self.Lbox, Nsize=self.Nsize, ax=ax, **kwargs
         )
+
 
     def plot_velocity_slice(self, component, index, axis=2, ax=None, **kwargs):
         """ Plot a slice of velocity field. 
@@ -666,51 +720,13 @@ class SimulationField3D:
         plot_velocity2d(
             velocity_slice, Lbox=self.Lbox, Nsize=self.Nsize, ax=ax, **kwargs
         )
+# -------------------END BOX FIELD CLASS-----------------------
 
 
-def plot_density2d(
-    density_slice_nHcgs, Lbox, Nsize, ax=None, vmin=0.1, vmax=1e3, **kwargs
-):
-    """ Plot a 2d density field.
-  """
 
-    # Create coordinate grid for pcolormesh
-    xgrid = np.linspace(0, Lbox, Nsize)
-    ygrid = np.linspace(0, Lbox, Nsize)
-    X, Y = np.meshgrid(xgrid, ygrid)
+# ---------------------3. FOLDED BOX CLASS---------------------
+class FoldedBox:
 
-    # Plot the density slice with unit label.
-    if ax is None:
-        fig, ax = plt.subplots(figsize=(10, 7))
-    p = ax.pcolormesh(
-        X, Y, density_slice_nHcgs, norm=LogNorm(vmin=vmin, vmax=vmax), **kwargs
-    )
-    ax.set_aspect("equal")
-    ax.set_xlabel("X (kpc)")
-    ax.set_ylabel("Y (kpc)")
-    plt.colorbar(p, label=r"$n_H$ $(\rm cm^{-3})$", ax=ax)
-
-
-def plot_velocity2d(velocity_slice, Lbox, Nsize, ax=None, **kwargs):
-    """ Plot a 2d velocity field of one component.
-  """
-
-    # Create coordinate grid for pcolormesh
-    xgrid = np.linspace(0, Lbox, Nsize)
-    ygrid = np.linspace(0, Lbox, Nsize)
-    X, Y = np.meshgrid(xgrid, ygrid)
-
-    # Plot the velocity slice with unit label.
-    if ax is None:
-        fig, ax = plt.subplots(figsize=(10, 7))
-    p = ax.pcolormesh(X, Y, velocity_slice, **kwargs)
-    ax.set_aspect("equal")
-    ax.set_xlabel("X (kpc)")
-    ax.set_ylabel("Y (kpc)")
-    plt.colorbar(p, label=r"$v \, (\rm km\,s^{-1})$", ax=ax)
-
-
-class FoldedField3D:
     def __init__(self, f, m, beta, Lbox, Nsize) -> None:
         # data
         self.f = f
@@ -722,6 +738,7 @@ class FoldedField3D:
         self.m = m
         self.beta = beta
         self.totalLbox = Lbox * m
+
 
     def fold_spctrm(
         self, fft_object, beta=np.array([0, 0, 0]), kmin=None, kmax=None, kres=None
@@ -761,38 +778,47 @@ class FoldedField3D:
         type(pwrSpctrm) is PowerSpectrum  # Mistery: why is this necessary?
         return pwrSpctrm
 
+
     def save(self, run_output_dir) -> None:
-        """Save the `FoldedField3D` object under `run_output_dir` using pickle."""
+        """Save the `FoldedBox` object under `run_output_dir` using pickle."""
         filename = os.path.join(
             run_output_dir, "folded_field_b{}{}{}.pkl".format(*self.beta)
         )  # e.g. 'folded_field_b000.pkl'
         with open(filename, "wb") as file:
             pickle.dump(self, file)
 
+
     @staticmethod
     def load(run_output_dir, beta):
-        """Load the saved `FoldedField3D` object from `run_output_dir` using pickle."""
+        """Load the saved `FoldedBox` object from `run_output_dir` using pickle."""
         filename = os.path.join(
             run_output_dir, "folded_field_b{}{}{}.pkl".format(*beta)
         )
         with open(filename, "rb") as file:
             return pickle.load(file)
+# -------------------END FOLDED BOX CLASS---------------------
 
 
-class BlocksDecomposition:
-    def __init__(self, data_folder, nblocks, Nblock, Lblock) -> None:
+
+
+# ------------------4. BRICK INVENTORY CLASS-------------------
+class BrickInventory:
+
+    def __init__(self, data_folder, nbrick, Nbrick, Lbrick) -> None:
         # data folder
         self.run_output_dir = data_folder
-        # block params
-        self.nblocks = nblocks
-        self.Nblock = Nblock
-        self.Lblock = Lblock
-        self.totalNsize = Nblock * nblocks
-        self.totalLbox = Lblock * nblocks
+        # brick params
+        self.nbrick = nbrick
+        self.Nbrick = Nbrick
+        self.Lbrick = Lbrick
+        self.totalNsize = Nbrick * nbrick
+        self.totalLbox = Lbrick * nbrick
 
-    class _BlockField3D(SimulationField3D):
-        def __init__(self, v, mass, Lblock, Nblock, r, s, t) -> None:
-            super().__init__(v, mass, Lcell=Lblock/Nblock)
+
+    class _BrickField(BoxField):
+
+        def __init__(self, v, mass, Lbrick, Nbrick, r, s, t) -> None:
+            super().__init__(v, mass, Lcell=Lbrick/Nbrick)
             self.r = r
             self.s = s
             self.t = t
@@ -811,7 +837,7 @@ class BlocksDecomposition:
             if quantity == "velocity":
                 phi = _apply_phase(self.get_v(), phase)
                 phi = fold_field(phi, m)
-                return FoldedField3D(phi, m, beta, self.Lbox / m, self.Nsize // m)
+                return FoldedBox(phi, m, beta, self.Lbox / m, self.Nsize // m)
             else:
                 raise Exception("""Unsupported physical quantity name.""")
 
@@ -819,25 +845,27 @@ class BlocksDecomposition:
             loc = (self.r, self.s, self.t)
             vvvm = np.stack((self.vx, self.vy, self.vz, self.mass), axis=3)
             filename = os.path.join(
-                run_output_dir, "block_field_loc{}{}{}.npy".format(*loc)
+                run_output_dir, "brick_field_loc{}{}{}.npy".format(*loc)
             )
             np.save(filename, vvvm)
 
-    def __getitem__(self, loc) -> _BlockField3D:
+
+    def __getitem__(self, loc) -> _BrickField:
         r, s, t = loc
         filename = os.path.join(
-            self.run_output_dir, "block_field_loc{}{}{}.npy".format(*loc)
+            self.run_output_dir, "brick_field_loc{}{}{}.npy".format(*loc)
         )
         vvvm = np.load(filename)
         v = vvvm[:, :, :, 0:3]
         mass = vvvm[:, :, :, 3]
 
-        field = self._BlockField3D(
-            v=v, mass=mass, Lblock=self.Lblock, Nblock=self.Nblock, r=r, s=s, t=t
+        field = self._BrickField(
+            v=v, mass=mass, Lbrick=self.Lbrick, Nbrick=self.Nbrick, r=r, s=s, t=t
         )
         return field
 
-    def fold(self, m, beta, quantity="velocity", Nresult=None) -> FoldedField3D:
+
+    def fold(self, m, beta, quantity="velocity", Nresult=None) -> FoldedBox:
         # if Nresult is not specified, the result will have size totalNsize//m
         if Nresult == None:
             Nresult = self.totalNsize // m
@@ -852,42 +880,42 @@ class BlocksDecomposition:
         f = np.zeros((Nresult, Nresult, Nresult, 3))
         f = np.array(f, dtype=np.complex128)  # prepare for phase
         # initialize a empty folded field object
-        foldedField3D = FoldedField3D(
+        foldedField = FoldedBox(
             f=f, m=m, beta=beta, Lbox=self.totalLbox / m, Nsize=self.totalNsize // m
         )
-        for r in range(self.nblocks):
-            for s in range(self.nblocks):
-                for t in range(self.nblocks):
-                    block_field = self[r, s, t]
+        for r in range(self.nbrick):
+            for s in range(self.nbrick):
+                for t in range(self.nbrick):
+                    brick_field = self[r, s, t]
                     if n > 1:
-                        block_field.down_sample(
+                        brick_field.down_sample(
                             n=n
-                        )  # block_field have size Nblock//n now
+                        )  # brick_field have size Nbrick//n now
 
-                    if m >= self.nblocks:  # fold stitch
-                        newfoldedField3D = block_field.fold(
-                            m=m // self.nblocks,
+                    if m >= self.nbrick:  # fold stitch
+                        newfoldedField = brick_field.fold(
+                            m=m // self.nbrick,
                             beta=beta,
                             totalNsize=self.totalNsize // n,
                             quantity=quantity,
                         )
-                        # m//nblocks is the folding factor of each block
-                        foldedField3D.f = (
-                            foldedField3D.f + newfoldedField3D.f
+                        # m//nbrick is the folding factor of each brick
+                        foldedField.f = (
+                            foldedField.f + newfoldedField.f
                         )  # add to folded
 
-                    elif m < self.nblocks:  # stitch fold
-                        u = self.nblocks // m  # Each field is composed of u^3 files
+                    elif m < self.nbrick:  # stitch fold
+                        u = self.nbrick // m  # Each field is composed of u^3 files
                         phase = _get_phase(
                             beta=beta,
                             totalNsize=self.totalNsize // n,
-                            Nphase=block_field.Nsize,
-                            x0=r * block_field.Nsize,
-                            y0=s * block_field.Nsize,
-                            z0=t * block_field.Nsize,
+                            Nphase=brick_field.Nsize,
+                            x0=r * brick_field.Nsize,
+                            y0=s * brick_field.Nsize,
+                            z0=t * brick_field.Nsize,
                         )
-                        f = _apply_phase(f=block_field.get_v(), phase=phase)
-                        foldedField3D.f[
+                        f = _apply_phase(f=brick_field.get_v(), phase=phase)
+                        foldedField.f[
                             (r % u) * Nresult // u : (r % u + 1) * Nresult // u,
                             (s % u) * Nresult // u : (s % u + 1) * Nresult // u,
                             (t % u) * Nresult // u : (t % u + 1) * Nresult // u,
@@ -899,27 +927,31 @@ class BlocksDecomposition:
         # P'(k) = m^3 P(k)
         # folding regions, the power spec increase by a factor of m^3
         # field needs to decrease by sqrt(m^3) to keep the same normalization
-        foldedField3D.f /= m ** 1.5
+        foldedField.f /= m ** 1.5
 
-        return foldedField3D
+        return foldedField
+
 
     def save(self) -> None:
-        """Save the `BlocksDecomposition` object under `run_output_dir` using pickle."""
-        filename = os.path.join(self.run_output_dir, "blocks_decomp.pkl")
+        """Save the `BrickInventory` object under `run_output_dir` using pickle."""
+        filename = os.path.join(self.run_output_dir, "brick_decomp.pkl")
         with open(filename, "wb") as file:
             pickle.dump(self, file)
 
+
     @staticmethod
     def load(run_output_dir):
-        """Load the saved `BlocksDecomposition` object from `run_output_dir` using pickle."""
-        filename = os.path.join(run_output_dir, "blocks_decomp.pkl")
+        """Load the saved `BrickInventory` object from `run_output_dir` using pickle."""
+        filename = os.path.join(run_output_dir, "brick_decomp.pkl")
         with open(filename, "rb") as file:
             return pickle.load(file)
+# -----------------END BRICK INVENTORY CLASS------------------
+
 
 
 def _vec_to_vm_grid(vec_grid, Lcell):
     """ This function restore mass and velocity from vec_grid. Used internally in
-  interp_field.
+  interp_field. This method is deprecated. 
   """
     # Extract mass from vec_grid
     rho_grid = vec_grid[:, :, :, 3]
@@ -1078,33 +1110,6 @@ def high_pass_filter_2d(field, Lbox, low_k=None):  # not very useful
     return field
 
 
-def DFT(f, pos, kSpace):  # for test purpose only
-    """
-  Calculate the direct particle-wise discrete Fourier transform given k space.
-  F_k = \sum_\alpha f_\alpha \exp{-i k \cdot x_\alpha}
-
-  In practice, this is approximated by deposit to grid and an FFT. This function
-  is used for evaluation of this approximation.
-  """
-    N = len(kSpace)
-    count = 0
-    total = N ** 3
-    F = np.zeros((N, N, N), dtype=np.complex128)
-    for n in range(N):
-        for l in range(N):
-            for m in range(N):
-                kx = complex(kSpace[n])
-                ky = complex(kSpace[l])
-                kz = complex(kSpace[m])
-                F_k = np.sum(
-                    f * np.exp(-1j * (kx * pos[:, 0] + ky * pos[:, 1] + kz * pos[:, 2]))
-                )
-                F[n, l, m] = F_k
-                count += 1
-            print("{:.2%}".format(count / total))
-    return F
-
-
 def deposit_to_grid(
     f, pos, Nsize, Lbox
 ):  # future update: incorporate with Particles class
@@ -1127,6 +1132,7 @@ def deposit_to_grid(
     return f_grid
 
 
+### UPDATE with wrapping C++ code!
 def ann_interpolate(
     data_pos,
     query_pos,
@@ -1342,19 +1348,19 @@ def _apply_phase(f, phase) -> np.ndarray:
 
     return phi
 
-
+@njit
 def _get_phase(beta, totalNsize, Nphase, x0, y0, z0) -> np.ndarray:
-    Nblock = Nphase
-    x = np.arange(x0, x0 + Nblock)
-    y = np.arange(y0, y0 + Nblock)
-    z = np.arange(z0, z0 + Nblock)
+    Nbrick = Nphase
+    x = np.arange(x0, x0 + Nbrick)
+    y = np.arange(y0, y0 + Nbrick)
+    z = np.arange(z0, z0 + Nbrick)
     xxx, yyy, zzz = np.meshgrid(x, y, z, indexing="ij")
     phase = np.exp(
         -1j * (2 * np.pi / totalNsize) * (beta[0] * xxx + beta[1] * yyy + beta[2] * zzz)
     )
     return phase
 
-
+@njit
 def fold_field(f, m):
     if m == 1:                              # m==1 means no folding
         return f
@@ -1382,7 +1388,7 @@ def fold_field(f, m):
 
     return r
 
-
+@njit
 def down_sample(r, n):
     if n == 1:                  # n==1 means no downsampling
         return r
@@ -1397,20 +1403,20 @@ def down_sample(r, n):
     return d
 
 
-def check_conservation(simParticles, simField3D) -> tuple:
+def check_conservation(gasParticles, boxField) -> tuple:
     """Check mass, momentum, energy conservation before and after interpolation.
   """
 
-    mass_0 = simParticles.total_mass()                  # mass
-    mass_interpolated = simField3D.total_mass()
+    mass_0 = gasParticles.total_mass()                  # mass
+    mass_interpolated = boxField.total_mass()
     mass_conservation = mass_interpolated / mass_0
     print("Total mass of particles: {:.3e}".format(mass_0))
     print("Total mass after interpolation: {:.3e}".format(mass_interpolated))
     print("Total mass restored by {:.3%}".format(mass_conservation)
     ) 
     print("\n")
-    momentum_0 = simParticles.total_momentum()          # momentum
-    momentum_interpolated = simField3D.total_momentum()
+    momentum_0 = gasParticles.total_momentum()          # momentum
+    momentum_interpolated = boxField.total_momentum()
     momentum_conservation = momentum_interpolated / momentum_0
     print("Total momentum of particles:", momentum_0)   # momentum is a vector 
     print("Total momentum after interpolation:", momentum_interpolated)
@@ -1421,8 +1427,8 @@ def check_conservation(simParticles, simField3D) -> tuple:
         )
     )
     print("\n")
-    energy_0 = simParticles.total_kinetic_energy()      # kinetic energy 
-    energy_interpolated = simField3D.total_kinetic_energy()
+    energy_0 = gasParticles.total_kinetic_energy()      # kinetic energy 
+    energy_interpolated = boxField.total_kinetic_energy()
     energy_conservation = energy_interpolated / energy_0
     print("Total kinetic energy of particles: {:.3e}".format(energy_0))
     print("Total kinetic energy after interpolation: {:.3e}".format(
@@ -1434,8 +1440,8 @@ def check_conservation(simParticles, simField3D) -> tuple:
         )
     )
     print("\n")
-    specific_energy_0 = simParticles.specific_kinetic_energy()      # specific energy
-    specific_energy_interpolated = simField3D.specific_kinetic_energy()
+    specific_energy_0 = gasParticles.specific_kinetic_energy()      # specific energy
+    specific_energy_interpolated = boxField.specific_kinetic_energy()
     specific_energy_conservation = specific_energy_interpolated / specific_energy_0
     print("Specific kinetic energy of particles: {:.3e}".format(specific_energy_0))
     print("Specific kinetic energy after interpolation: {:.3e}".format(
@@ -1448,3 +1454,48 @@ def check_conservation(simParticles, simField3D) -> tuple:
     )
 
     return mass_conservation, momentum_conservation, energy_conservation, specific_energy_conservation
+
+
+def plot_density2d(
+    density_slice_nHcgs, Lbox, Nsize, ax=None, vmin=0.1, vmax=1e3, **kwargs
+):
+    """ Plot a 2d density field.
+  """
+
+    # Create coordinate grid for pcolormesh
+    xgrid = np.linspace(0, Lbox, Nsize)
+    ygrid = np.linspace(0, Lbox, Nsize)
+    X, Y = np.meshgrid(xgrid, ygrid)
+
+    # Plot the density slice with unit label.
+    if ax is None:
+        fig, ax = plt.subplots(figsize=(10, 7))
+    p = ax.pcolormesh(
+        X, Y, density_slice_nHcgs, norm=LogNorm(vmin=vmin, vmax=vmax), **kwargs
+    )
+    ax.set_aspect("equal")
+    ax.set_xlabel("X (kpc)")
+    ax.set_ylabel("Y (kpc)")
+    plt.colorbar(p, label=r"$n_H$ $(\rm cm^{-3})$", ax=ax)
+
+
+def plot_velocity2d(velocity_slice, Lbox, Nsize, ax=None, **kwargs):
+    """ Plot a 2d velocity field of one component.
+  """
+
+    # Create coordinate grid for pcolormesh
+    xgrid = np.linspace(0, Lbox, Nsize)
+    ygrid = np.linspace(0, Lbox, Nsize)
+    X, Y = np.meshgrid(xgrid, ygrid)
+
+    # Plot the velocity slice with unit label.
+    if ax is None:
+        fig, ax = plt.subplots(figsize=(10, 7))
+    p = ax.pcolormesh(X, Y, velocity_slice, **kwargs)
+    ax.set_aspect("equal")
+    ax.set_xlabel("X (kpc)")
+    ax.set_ylabel("Y (kpc)")
+    plt.colorbar(p, label=r"$v \, (\rm km\,s^{-1})$", ax=ax)
+
+
+
