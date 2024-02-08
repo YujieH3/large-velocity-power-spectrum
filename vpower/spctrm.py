@@ -19,7 +19,149 @@ import matplotlib.pyplot as plt
 import os
 import pickle
 
+import pyfftw
 
+
+def _vector_power(fx, fy, fz, Lbox, Nsize):
+    """
+  Calculate FFT and power grid before sampling. This function does the main 
+  math and physics in power spectrum computation.
+
+  Default normalization is such that
+  `np.sum(Pk*(2*np.pi/Lbox)**3)` and `0.5*np.mean(vx**2+vy**2+vz**2)` are equal
+  """
+    # Fourier transform
+    a = (Lbox / (2 * np.pi)) ** 1.5 / Nsize ** 3
+    fkx = pyfftw.interfaces.numpy_fft.fftn(fx) * a
+    fky = pyfftw.interfaces.numpy_fft.fftn(fy) * a
+    fkz = pyfftw.interfaces.numpy_fft.fftn(fz) * a
+    # Definition of velocity power spectrum
+    Pk = 0.5 * (np.abs(fkx) ** 2 + np.abs(fky) ** 2 + np.abs(fkz) ** 2)
+    return Pk
+
+
+def _FFTW_vector_power(f, Lbox, Nsize, fft_object):
+    """
+  Calculate FFT and power grid before sampling. This function does the main 
+  math and physics in power spectrum computation. The fft_object should works on
+  one component of the vector field at a time.
+
+  Default normalization is such that
+  `np.sum(Pk*(2*np.pi/Lbox)**3)` and `0.5*np.mean(vx**2+vy**2+vz**2)` are equal
+  """
+
+    # Fourier transform
+    a = (Lbox / (2 * np.pi)) ** 1.5 / Nsize ** 3
+    fk = fft_object(f) * a
+    # Definition of velocity power spectrum
+    Pk = 0.5 * np.sum(np.abs(fk) ** 2, axis=3)
+    return Pk
+
+
+def _scalar_power(f, Lbox, Nsize):
+    """
+  Calculate FFT and power grid before sampling. This function does the main 
+  math and physics in power spectrum computation.
+
+  Default normalization is such that
+  `np.sum(Pk*(2*np.pi/Lbox)**3)` and `np.mean(scalar**2)` are equal
+  """
+    # Fourier transform
+    a = (Lbox / (2 * np.pi)) ** 1.5 / Nsize ** 3
+    fk = pyfftw.interfaces.numpy_fft.fftn(f) * a
+    # Power spectrum
+    Pk = 0.5 * np.abs(fk) ** 2
+    return Pk
+
+
+def _FFTW_scalar_power(f, Lbox, Nsize, fft_object):
+    """
+  Calculate FFT and power grid before sampling. This function does the main 
+  math and physics in power spectrum computation.
+
+  Default normalization is such that
+  `np.sum(Pk*(2*np.pi/Lbox)**3)` and `np.mean(scalar**2)` are equal
+  """
+    # Fourier transform
+    a = (Lbox / (2 * np.pi)) ** 1.5 / Nsize ** 3
+    fk = fft_object(f) * a
+    # Power spectrum
+    Pk = 0.5 * np.abs(fk) ** 2
+    return Pk
+
+
+def _pair_power(Pk, Lbox, Nsize, shift=np.array([0, 0, 0])):
+    """
+  Create pairs of power and k. Sampling in concentric spherical
+  shells with PkSample to get power spectrum. Called by PowerSpec3D.
+  This function is independent of the physics and definition of the
+  power spectrum
+  """
+    # Initialize k space
+    Lcell = Lbox / float(Nsize)
+    kSpace = 2 * np.pi * np.fft.fftfreq(Nsize, Lcell)
+    # Create k and power pairs
+    kx, ky, kz = np.meshgrid(kSpace, kSpace, kSpace, indexing="ij")
+    # Apply shift
+    if shift[0] > 0:
+        kx = kx + shift[0]
+    if shift[1] > 0:
+        ky = ky + shift[1]
+    if shift[2] > 0:
+        kz = kz + shift[2]
+    #
+    k = np.sqrt(kx * kx + ky * ky + kz * kz)
+    # Construct a (n,2) shape array
+    k = np.ravel(k)
+    Pk = np.ravel(Pk)
+    Pk_pair = np.stack((k, Pk))  # Shape (2,n)
+    Pk_pair = np.transpose(Pk_pair)  # Shape (n,2)
+
+    return Pk_pair
+
+
+def _hist_sample(Pk_pair, kmin, kmax, spacing):
+    """ Calculate mean power from Pk pair with specified spacing. """
+    bin_centers = np.arange(kmin, kmax + spacing, spacing)
+    bin_edges = np.arange(kmin - spacing / 2, kmax + 3 * spacing / 2, spacing)
+    Psum, bin_edges_ = np.histogram(
+        Pk_pair[:, 0], bins=bin_edges, weights=Pk_pair[:, 1]
+    )
+    Nsample, bin_edges_ = np.histogram(Pk_pair[:, 0], bins=bin_edges)
+    P = Psum / Nsample
+    P[Nsample == 0] = 0  # Set P=0 if no sample
+    Pvk = np.column_stack((bin_centers, P, Psum, Nsample))
+
+    return Pvk
+
+
+def high_pass_filter_2d(field, Lbox, low_k=None):  # not very useful
+    """
+  Remove the k below low_k end of the given image, supposing the low-k end is located at 
+  the center of the image. Note that in practice of numpy.fft package, the low-k
+  end is at the corner while high-k is in the middle. Should apply 
+  np.fft.fftshift() before using this funciton.
+
+  if low_k is not specified, we will take low_k = 2 pi / Lcell.
+  """
+    dk = 2 * np.pi / Lbox
+    Nsize = len(field)
+    if low_k is None:
+        Lcell = Nsize / Lbox
+        low_k = 2 * np.pi / Lcell
+    pixel_rad = low_k // dk
+    grid = np.arange(0, Nsize)
+    x, y = np.meshgrid(grid, grid, indexing="ij")
+    x_ctr = x - Nsize // 2
+    y_ctr = y - Nsize // 2
+    filter = x_ctr ** 2 + y_ctr ** 2 <= pixel_rad ** 2
+    field[filter] = 0
+    return field
+
+
+
+
+# -----------------------POWER SPECTRUM CLASS--------------------
 class PowerSpectrum:
     def __init__(self, Pk, m=0, beta=np.array([-1, -1, -1])) -> None:
         # data
@@ -211,8 +353,12 @@ class PowerSpectrum:
             )
         with open(filename, "rb") as file:
             return pickle.load(file)
+# -------------------END POWER SPECTRUM CLASS------------------
 
 
+
+
+# --------------------------SPECTRUM LIST CLASS--------------------
 class SpectrumList:
     def __init__(self, spctrm_list):
         self.list = spctrm_list
@@ -277,6 +423,9 @@ class SpectrumList:
                 except NameError:
                     spctrmList = SpectrumList([spctrm])  # Create if not exist
         return spctrmList
+# --------------------END SPECTRUM LIST-----------------------
+
+
 
 
 def relative_diff(spctrm1, spctrm2, mode="max") -> float:
@@ -339,40 +488,3 @@ def random_beta_sequence(m, seed=1):
     beta_space = init_beta_space(m)
     np.random.permutation(beta_space)
     return beta_space
-
-
-from hilbertcurve.hilbertcurve import HilbertCurve
-
-
-def hilbert_beta_sequence(m, randomize=False, seed=1):
-    """Create a beta sequence based on the Hilbert curve. From 1st to m-th level."""
-    all_points = []
-    log2m = int(np.log2(m))
-    if randomize:  # random shuffle the points within each level
-        np.random.seed(seed)
-    for p in range(1, log2m + 1):  # list hilbert curve points level by level
-        hilbert_curve = HilbertCurve(p=p, n=3)
-        points = hilbert_curve.points_from_distances(np.arange((2 ** p) ** 3))
-        points = np.array(points)
-
-        scale = 2 ** (log2m - p - 1)
-        scale = 1 if scale < 1 else scale
-        shift = log2m - p + 1
-        shift = 0 if log2m == p else shift
-        points = (
-            points * (scale) + shift
-        )  # scale points up to cover the centering (m/2)^3 of the cube
-        # print(points)
-        if randomize:
-            points = np.random.permutation(points)
-        all_points.append(points)
-    # Remove duplicate points
-    sequence = np.concatenate(all_points)
-    indexes = np.unique(sequence, axis=0, return_index=True)[1]
-    sequence = [sequence[index] for index in sorted(indexes)]
-    if len(sequence) == m ** 3:
-        return sequence
-    elif len(sequence) < m ** 3:
-        raise ValueError("The sequence does not cover the beta space completely.")
-    elif len(sequence) > m ** 3:
-        raise ValueError("The sequence covers the beta space more than once.")

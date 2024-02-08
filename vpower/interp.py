@@ -35,6 +35,7 @@ import numpy as np
 import pyfftw
 from numba import njit
 
+import pyann
 from voxelize import Voxelize
 Voxelize.__init__(self=Voxelize, use_gpu=False, network_dir=None)  # type: ignore
 
@@ -132,7 +133,7 @@ def load_snapshot(file, Lbox=1.0,
 
 
 
-# --------------------1. GAS PARTICLES CLASS---------------------
+# -----------------------GAS PARTICLES CLASS---------------------
 class GasParticles:
 
     def __init__(self, pos, mass, density, velocity, Lbox) -> None:
@@ -247,11 +248,9 @@ class GasParticles:
     def ann_interp_to_field(
         self, 
         Nsize, 
-        eps          = 0.0,
-        data_file    = "data.pts",
-        query_file   = "query.pts",
-        output_file  = "ann_output.save",
-        overwrite    = True
+        eps        = 0.0,
+        treetype   = 'kd',
+        searchtype = 'standard'
     ):
         """ Interpolate velocity using ANN. This method is wrapped around 
         `ann_interpolate()` and should be the one called directly when using
@@ -263,15 +262,13 @@ class GasParticles:
         Lcell = self.Lbox / Nsize
 
         vec_grid = ann_interpolate(    # now run ANN
-            data_pos    = self.pos,    # and link the rho-v vectors to the query cells
-            query_pos   = make_grid_coords(Lbox=self.Lbox, Nsize=Nsize),
-            f           = self.density_velocity_vector(),
-            Nsize       = Nsize,
-            eps         = eps,
-            data_file   = data_file,   # AVOID R/W BY ADDING PYTHON BINDING TO ANN
-            query_file  = query_file,
-            output_file = output_file,
-            overwrite   = overwrite
+            data_pos   = self.pos, 
+            query_pos  = make_grid_coords(Lbox=self.Lbox, Nsize=Nsize),
+            f          = self.density_velocity_vector(),
+            Nsize      = Nsize,
+            eps        = eps,
+            treetype   = 'kd',
+            searchtype = 'standard',
         )
 
         v_grid = vec_grid[..., :3] / vec_grid[..., 3, None]     # divide by mass
@@ -451,7 +448,7 @@ class GasParticles:
 
 
 
-# ----------------------2. BOX FIELD CLASS-----------------------
+# -------------------------BOX FIELD CLASS-----------------------
 class BoxField:
 
     def __init__(self, v, mass, Lcell) -> None:
@@ -665,6 +662,15 @@ class BoxField:
         return np.array([px, py, pz])
 
 
+    def peek(self):
+        """A quick peek at the density and velocity slices."""
+        fig, ax = plt.subplots(1, 2, figsize=(12, 6), dpi=300)
+        slice = self.Nsize // 2
+        self.plot_density_slice(slice, axis=2, ax=ax[0])
+        self.plot_velocity_slice(0, slice, axis=2, ax=ax[1])
+        plt.show()
+
+
     def plot_density_slice(self, index, axis=2, ax=None, **kwargs):
         """ Plot a slice of density field. Convert to nHcgs units.
     """
@@ -724,7 +730,9 @@ class BoxField:
 
 
 
-# ---------------------3. FOLDED BOX CLASS---------------------
+
+
+# -----------------------FOLDED BOX CLASS----------------------
 class FoldedBox:
 
     def __init__(self, f, m, beta, Lbox, Nsize) -> None:
@@ -801,7 +809,9 @@ class FoldedBox:
 
 
 
-# ------------------4. BRICK INVENTORY CLASS-------------------
+
+
+# ---------------------BRICK INVENTORY CLASS-------------------
 class BrickInventory:
 
     def __init__(self, data_folder, nbrick, Nbrick, Lbrick) -> None:
@@ -949,6 +959,10 @@ class BrickInventory:
 
 
 
+
+
+
+
 def _vec_to_vm_grid(vec_grid, Lcell):
     """ This function restore mass and velocity from vec_grid. Used internally in
   interp_field. This method is deprecated. 
@@ -973,141 +987,6 @@ def _vec_to_vm_grid(vec_grid, Lcell):
     return vec_grid[:, :, :, 0:3], m_grid
 
 
-def _vector_power(fx, fy, fz, Lbox, Nsize):
-    """
-  Calculate FFT and power grid before sampling. This function does the main 
-  math and physics in power spectrum computation.
-
-  Default normalization is such that
-  `np.sum(Pk*(2*np.pi/Lbox)**3)` and `0.5*np.mean(vx**2+vy**2+vz**2)` are equal
-  """
-    # Fourier transform
-    a = (Lbox / (2 * np.pi)) ** 1.5 / Nsize ** 3
-    fkx = pyfftw.interfaces.numpy_fft.fftn(fx) * a
-    fky = pyfftw.interfaces.numpy_fft.fftn(fy) * a
-    fkz = pyfftw.interfaces.numpy_fft.fftn(fz) * a
-    # Definition of velocity power spectrum
-    Pk = 0.5 * (np.abs(fkx) ** 2 + np.abs(fky) ** 2 + np.abs(fkz) ** 2)
-    return Pk
-
-
-def _FFTW_vector_power(f, Lbox, Nsize, fft_object):
-    """
-  Calculate FFT and power grid before sampling. This function does the main 
-  math and physics in power spectrum computation. The fft_object should works on
-  one component of the vector field at a time.
-
-  Default normalization is such that
-  `np.sum(Pk*(2*np.pi/Lbox)**3)` and `0.5*np.mean(vx**2+vy**2+vz**2)` are equal
-  """
-
-    # Fourier transform
-    a = (Lbox / (2 * np.pi)) ** 1.5 / Nsize ** 3
-    fk = fft_object(f) * a
-    # Definition of velocity power spectrum
-    Pk = 0.5 * np.sum(np.abs(fk) ** 2, axis=3)
-    return Pk
-
-
-def _scalar_power(f, Lbox, Nsize):
-    """
-  Calculate FFT and power grid before sampling. This function does the main 
-  math and physics in power spectrum computation.
-
-  Default normalization is such that
-  `np.sum(Pk*(2*np.pi/Lbox)**3)` and `np.mean(scalar**2)` are equal
-  """
-    # Fourier transform
-    a = (Lbox / (2 * np.pi)) ** 1.5 / Nsize ** 3
-    fk = pyfftw.interfaces.numpy_fft.fftn(f) * a
-    # Power spectrum
-    Pk = 0.5 * np.abs(fk) ** 2
-    return Pk
-
-
-def _FFTW_scalar_power(f, Lbox, Nsize, fft_object):
-    """
-  Calculate FFT and power grid before sampling. This function does the main 
-  math and physics in power spectrum computation.
-
-  Default normalization is such that
-  `np.sum(Pk*(2*np.pi/Lbox)**3)` and `np.mean(scalar**2)` are equal
-  """
-    # Fourier transform
-    a = (Lbox / (2 * np.pi)) ** 1.5 / Nsize ** 3
-    fk = fft_object(f) * a
-    # Power spectrum
-    Pk = 0.5 * np.abs(fk) ** 2
-    return Pk
-
-
-def _pair_power(Pk, Lbox, Nsize, shift=np.array([0, 0, 0])):
-    """
-  Create pairs of power and k. Sampling in concentric spherical
-  shells with PkSample to get power spectrum. Called by PowerSpec3D.
-  This function is independent of the physics and definition of the
-  power spectrum
-  """
-    # Initialize k space
-    Lcell = Lbox / float(Nsize)
-    kSpace = 2 * np.pi * np.fft.fftfreq(Nsize, Lcell)
-    # Create k and power pairs
-    kx, ky, kz = np.meshgrid(kSpace, kSpace, kSpace, indexing="ij")
-    # Apply shift
-    if shift[0] > 0:
-        kx = kx + shift[0]
-    if shift[1] > 0:
-        ky = ky + shift[1]
-    if shift[2] > 0:
-        kz = kz + shift[2]
-    #
-    k = np.sqrt(kx * kx + ky * ky + kz * kz)
-    # Construct a (n,2) shape array
-    k = np.ravel(k)
-    Pk = np.ravel(Pk)
-    Pk_pair = np.stack((k, Pk))  # Shape (2,n)
-    Pk_pair = np.transpose(Pk_pair)  # Shape (n,2)
-
-    return Pk_pair
-
-
-def _hist_sample(Pk_pair, kmin, kmax, spacing):
-    """ Calculate mean power from Pk pair with specified spacing. """
-    bin_centers = np.arange(kmin, kmax + spacing, spacing)
-    bin_edges = np.arange(kmin - spacing / 2, kmax + 3 * spacing / 2, spacing)
-    Psum, bin_edges_ = np.histogram(
-        Pk_pair[:, 0], bins=bin_edges, weights=Pk_pair[:, 1]
-    )
-    Nsample, bin_edges_ = np.histogram(Pk_pair[:, 0], bins=bin_edges)
-    P = Psum / Nsample
-    P[Nsample == 0] = 0  # Set P=0 if no sample
-    Pvk = np.column_stack((bin_centers, P, Psum, Nsample))
-
-    return Pvk
-
-
-def high_pass_filter_2d(field, Lbox, low_k=None):  # not very useful
-    """
-  Remove the k below low_k end of the given image, supposing the low-k end is located at 
-  the center of the image. Note that in practice of numpy.fft package, the low-k
-  end is at the corner while high-k is in the middle. Should apply 
-  np.fft.fftshift() before using this funciton.
-
-  if low_k is not specified, we will take low_k = 2 pi / Lcell.
-  """
-    dk = 2 * np.pi / Lbox
-    Nsize = len(field)
-    if low_k is None:
-        Lcell = Nsize / Lbox
-        low_k = 2 * np.pi / Lcell
-    pixel_rad = low_k // dk
-    grid = np.arange(0, Nsize)
-    x, y = np.meshgrid(grid, grid, indexing="ij")
-    x_ctr = x - Nsize // 2
-    y_ctr = y - Nsize // 2
-    filter = x_ctr ** 2 + y_ctr ** 2 <= pixel_rad ** 2
-    field[filter] = 0
-    return field
 
 
 def deposit_to_grid(
@@ -1132,57 +1011,38 @@ def deposit_to_grid(
     return f_grid
 
 
-### UPDATE with wrapping C++ code!
 def ann_interpolate(
     data_pos,
     query_pos,
     f,
     Nsize,
     eps,
-    data_file="data.pts",
-    query_file="query.pts",
-    output_file="ann_output.save",
-    overwrite=True,
+    treetype   = 'kd',
+    searchtype = 'standard',
 ):
+    results = pyann.nn2(
+        data       = np.matrix(data_pos),
+        query      = np.matrix(query_pos),
+        k          = 1,
+        eps        = eps,
+        treetype   = treetype,
+        searchtype = searchtype,
+    )
+    index = np.array(results.nn_idx) # pyann returns a 2d numpy matrix
+    index = np.squeeze(index)        # change to 1d array
+    index -= 1                       # pyann index starts from 1
 
-    t0 = time.perf_counter()
-    # Prepare data.pts
-    if not os.path.isfile(data_file) or overwrite is True:  # set overwrite true when testing.
-        save_ann_pts(data_pos, file=data_file)
-        print("Data file saved. Time taken: {:.2f} s".format(time.perf_counter() - t0))
-    elif os.path.isfile(data_file):
-        print("Data file found.")
+    # deposit data to grid according to pyann found index
+    if np.ndim(f) == 1:         # scalar field
+        data_grid = f[index]    # correlate data to query positions
+        data_grid = np.reshape(data_grid, (Nsize, Nsize, Nsize))
+    elif np.ndim(f) == 2:       # vector field
+        data_grid = f[index, :] # correlate data to query positions
+        data_grid = np.reshape(data_grid, (Nsize, Nsize, Nsize, f.shape[1]))
     else:
-        raise Exception("Unrecognized data file status.")
+        raise Exception("Unsupported data shape.")
 
-    t0 = time.perf_counter()
-    # Prepare query.pts if not existed
-    if not os.path.isfile(query_file) or overwrite is True:
-        save_ann_pts(query_pos, file=query_file)  # prepare the grids to be interpolated, save as
-        print("Query file saved. "
-              "Time taken: {:.2f} s".format(time.perf_counter() - t0))
-    elif os.path.isfile(query_file):
-        print("Query file found.")
-    else:
-        raise Exception("Unrecognized query file status.")
-
-    if not os.path.isfile(output_file) or overwrite is True:
-        # Run approximate nearest neighbor
-        maxpts = len(data_pos)  
-        # set maximum number of data points to the exact number of data points
-        ann_run(eps=eps, maxpts=maxpts, 
-                data_file=data_file, query_file=query_file, output_file=output_file)  # call the ann library through command line
-    elif os.path.isfile(output_file):
-        print("ANN output found.")
-    else:
-        raise Exception("Unrecognized ANN output status.")
-
-    # Read the ANN output and deposit the grids
-    t0 = time.perf_counter()
-    f_grid = read_ann_to_grid(f, Nsize, file=output_file)
-    print("ANN output read. Time taken: {:.2f} s".format(time.perf_counter() - t0))
-
-    return f_grid
+    return data_grid
 
 
 def save_ann_data_pts(data_pos, file="data.pts") -> None:
@@ -1456,6 +1316,12 @@ def check_conservation(gasParticles, boxField) -> tuple:
     return mass_conservation, momentum_conservation, energy_conservation, specific_energy_conservation
 
 
+
+
+
+
+
+# --------------------------VISUALIZATION--------------------------
 def plot_density2d(
     density_slice_nHcgs, Lbox, Nsize, ax=None, vmin=0.1, vmax=1e3, **kwargs
 ):
@@ -1479,7 +1345,8 @@ def plot_density2d(
     plt.colorbar(p, label=r"$n_H$ $(\rm cm^{-3})$", ax=ax)
 
 
-def plot_velocity2d(velocity_slice, Lbox, Nsize, ax=None, **kwargs):
+def plot_velocity2d(velocity_slice, Lbox, Nsize, ax=None, **kwargs): 
+    # update someday to add flow arrow
     """ Plot a 2d velocity field of one component.
   """
 
