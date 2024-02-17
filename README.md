@@ -7,3 +7,9 @@
 
 This code is aimed to calculate velocity, momentum, kinetic energy power spectrum over a large dynamical range. It is still in active development and testing.
 <!-- For more information, please refer to Vpower's [documentation](https://vpower.readthedocs.io/en/latest/). -->
+
+
+To run the code
+```
+mpiexec -n 4 python parallel.py
+```

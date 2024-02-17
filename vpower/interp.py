@@ -33,7 +33,7 @@ import warnings
 import subprocess
 import numpy as np
 import pyfftw
-from numba import njit
+# from numba import njit
 
 import pyann
 from voxelize import Voxelize
@@ -1202,13 +1202,12 @@ def _apply_phase(f, phase) -> np.ndarray:
     if phi.shape == phase.shape:
         phi *= phase
     else:
-        phi[:, :, :, 0] *= phase
-        phi[:, :, :, 1] *= phase
+        phi[:, :, :, 0] *= phase # [:,None] can be used to add a new axis
+        phi[:, :, :, 1] *= phase # and also :, :, :, can be shortened to ...
         phi[:, :, :, 2] *= phase
 
     return phi
 
-@njit
 def _get_phase(beta, totalNsize, Nphase, x0, y0, z0) -> np.ndarray:
     Nbrick = Nphase
     x = np.arange(x0, x0 + Nbrick)
@@ -1220,7 +1219,7 @@ def _get_phase(beta, totalNsize, Nphase, x0, y0, z0) -> np.ndarray:
     )
     return phase
 
-@njit
+# @njit
 def fold_field(f, m):
     if m == 1:                              # m==1 means no folding
         return f
@@ -1248,7 +1247,7 @@ def fold_field(f, m):
 
     return r
 
-@njit
+# @njit
 def down_sample(r, n):
     if n == 1:                  # n==1 means no downsampling
         return r
@@ -1366,3 +1365,114 @@ def plot_velocity2d(velocity_slice, Lbox, Nsize, ax=None, **kwargs):
 
 
 
+def _vector_power(fx, fy, fz, Lbox, Nsize):
+    """
+  Calculate FFT and power grid before sampling. This function does the main 
+  math and physics in power spectrum computation.
+
+  Default normalization is such that
+  `np.sum(Pk*(2*np.pi/Lbox)**3)` and `0.5*np.mean(vx**2+vy**2+vz**2)` are equal
+  """
+    # Fourier transform
+    a = (Lbox / (2 * np.pi)) ** 1.5 / Nsize ** 3
+    fkx = pyfftw.interfaces.numpy_fft.fftn(fx, threads=1) * a
+    fky = pyfftw.interfaces.numpy_fft.fftn(fy, threads=1) * a
+    fkz = pyfftw.interfaces.numpy_fft.fftn(fz, threads=1) * a
+    # Definition of velocity power spectrum
+    Pk = 0.5 * (np.abs(fkx) ** 2 + np.abs(fky) ** 2 + np.abs(fkz) ** 2)
+    return Pk
+
+
+def _FFTW_vector_power(f, Lbox, Nsize, fft_object):
+    """
+  Calculate FFT and power grid before sampling. This function does the main 
+  math and physics in power spectrum computation. The fft_object should works on
+  one component of the vector field at a time.
+
+  Default normalization is such that
+  `np.sum(Pk*(2*np.pi/Lbox)**3)` and `0.5*np.mean(vx**2+vy**2+vz**2)` are equal
+  """
+
+    # Fourier transform
+    a = (Lbox / (2 * np.pi)) ** 1.5 / Nsize ** 3
+    fk = fft_object(f) * a
+    # Definition of velocity power spectrum
+    Pk = 0.5 * np.sum(np.abs(fk) ** 2, axis=3)
+    return Pk
+
+
+def _scalar_power(f, Lbox, Nsize):
+    """
+  Calculate FFT and power grid before sampling. This function does the main 
+  math and physics in power spectrum computation.
+
+  Default normalization is such that
+  `np.sum(Pk*(2*np.pi/Lbox)**3)` and `np.mean(scalar**2)` are equal
+  """
+    # Fourier transform
+    a = (Lbox / (2 * np.pi)) ** 1.5 / Nsize ** 3
+    fk = pyfftw.interfaces.numpy_fft.fftn(f) * a
+    # Power spectrum
+    Pk = 0.5 * np.abs(fk) ** 2
+    return Pk
+
+
+def _FFTW_scalar_power(f, Lbox, Nsize, fft_object):
+    """
+  Calculate FFT and power grid before sampling. This function does the main 
+  math and physics in power spectrum computation.
+
+  Default normalization is such that
+  `np.sum(Pk*(2*np.pi/Lbox)**3)` and `np.mean(scalar**2)` are equal
+  """
+    # Fourier transform
+    a = (Lbox / (2 * np.pi)) ** 1.5 / Nsize ** 3
+    fk = fft_object(f) * a
+    # Power spectrum
+    Pk = 0.5 * np.abs(fk) ** 2
+    return Pk
+
+
+def _pair_power(Pk, Lbox, Nsize, shift=np.array([0, 0, 0])):
+    """
+  Create pairs of power and k. Sampling in concentric spherical
+  shells with PkSample to get power spectrum. Called by PowerSpec3D.
+  This function is independent of the physics and definition of the
+  power spectrum
+  """
+    # Initialize k space
+    Lcell = Lbox / float(Nsize)
+    kSpace = 2 * np.pi * np.fft.fftfreq(Nsize, Lcell)
+    # Create k and power pairs
+    kx, ky, kz = np.meshgrid(kSpace, kSpace, kSpace, indexing="ij")
+    # Apply shift
+    if shift[0] > 0:
+        kx = kx + shift[0]
+    if shift[1] > 0:
+        ky = ky + shift[1]
+    if shift[2] > 0:
+        kz = kz + shift[2]
+    #
+    k = np.sqrt(kx * kx + ky * ky + kz * kz)
+    # Construct a (n,2) shape array
+    k = np.ravel(k)
+    Pk = np.ravel(Pk)
+    Pk_pair = np.stack((k, Pk))  # Shape (2,n)
+    Pk_pair = np.transpose(Pk_pair)  # Shape (n,2)
+
+    return Pk_pair
+
+
+def _hist_sample(Pk_pair, kmin, kmax, spacing):
+    """ Calculate mean power from Pk pair with specified spacing. """
+    bin_centers = np.arange(kmin, kmax + spacing, spacing)
+    bin_edges = np.arange(kmin - spacing / 2, kmax + 3 * spacing / 2, spacing)
+    Psum, bin_edges_ = np.histogram(
+        Pk_pair[:, 0], bins=bin_edges, weights=Pk_pair[:, 1]
+    )
+    Nsample, bin_edges_ = np.histogram(Pk_pair[:, 0], bins=bin_edges)
+    P = Psum / Nsample
+    P[Nsample == 0] = 0  # Set P=0 if no sample
+    Pvk = np.column_stack((bin_centers, P, Psum, Nsample))
+
+    return Pvk
