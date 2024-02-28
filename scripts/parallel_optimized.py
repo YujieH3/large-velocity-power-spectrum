@@ -41,8 +41,9 @@ seconds.
 
 # ------------------------CONFIG------------------------
 SNAPSHOT = '/appalachia/d5/DISK/from_pleiades/snapshots/gmcs0_wind0_gmc9/snapshot_550.hdf5'
-NTOT = 256 # total resolution. The dynamical range would be NTOT/2, from 2pi/NTOT to pi/LCELL
+NTOT = 512 # total resolution. The dynamical range would be NTOT/2, from 2pi/NTOT to pi/LCELL
 LTOT = 1 # kpc
+NPTS = 1000 # number of points to query before synchronize.
 remove_bulk_velocity = True
 
 # -----------------------FUNCTIONS----------------------
@@ -136,6 +137,7 @@ if __name__ == '__main__':
     LCELL = LTOT / NTOT  # kpc 
 
     # ------------------------------ALLOCATE WORK-------------------------------
+    # Interpolation box assignment
     m = THREADS**(1/3)  # number of threads in each dimension, and the folding factor
     assert m.is_integer(), 'Number of threads must be a cube of an integer, for now.'
     r = rank // m**2
@@ -145,6 +147,14 @@ if __name__ == '__main__':
     Lbox  = LTOT / m
     assert Nbox.is_integer(), 'Divided Nbox must be an integer.'
     Nbox = int(Nbox)
+
+    #  
+    n_pad = NPTS % Nbox
+
+    # Phase factor assignment
+    bx = r # bx, by, bz are not necessarily equal to r, s, t. and is assigned to each CPU
+    by = s # can modify this later to allow for more flexible
+    bz = t # task assignment.
 
     # use the core number and a total resolution only to define the spilitting scheme?
     print(f'Rank: {rank}, r: {r}, s: {s}, t: {t}, Nbox per box: {Nbox}')
@@ -192,7 +202,13 @@ if __name__ == '__main__':
     # where Nbox is the largest integer < Nmaxbox that keeps n_loops an integer.
     # So it's a factorization problem of NTOT/n_threads.
     
-    f = np.empty((Nbox, Nbox, Nbox, 3), dtype=np.complex64) # vector field only for now
+    queue_idx = 0
+    f_idx = 0 # index track the index of the first empty element in f array
+    x_queue = np.empty(NPTS, dtype=np.float32)
+    y_queue = np.empty(NPTS, dtype=np.float32)
+    z_queue = np.empty(NPTS, dtype=np.float32)
+    a_queue = np.empty((NPTS, 3), dtype=np.float32)
+    f = np.empty((Nbox**3, 3), dtype=np.complex64) # folded field with phase.
     for i in range(Nbox):
         for j in range(Nbox):
             for k in range(Nbox):
@@ -202,32 +218,47 @@ if __name__ == '__main__':
                 x = (r * Nbox + i) * LCELL
                 y = (s * Nbox + j) * LCELL
                 z = (t * Nbox + k) * LCELL
-                query = np.array([x, y, z]) # specific location to query, dependent on rank
+
+                query = np.array([x, y, z], dtype=np.float32) # specific location to query, dependent on rank
                 # print(f'Rank: {rank}, query: {query} of shape {query.shape}')
-                nb = ann_idx.get_nns_by_vector(query, n=1, search_k=-1, include_distances=False) # type: ignore
+                nb = ann_idx.get_nns_by_vector(query, n=1, search_k=-1, 
+                                               include_distances=False) # type: ignore
                 # print(nb) # of shape (1,) because we query only the 1 nearest neighbor
 
                 a = velocity[nb[0]] # type: ignore # extract the velocity of corresponding index
+                
+                a_queue[queue_idx] = a
+                x_queue[queue_idx] = x
+                y_queue[queue_idx] = y
+                z_queue[queue_idx] = z
 
-                # comm.Barrier() # forced synchronization
-                a_arr = comm.allgather(a) # array of size [THREADS, 3] all_gather add an axis in the front
-                x_arr = comm.allgather(x) # or generate x_arr each cpu.
-                y_arr = comm.allgather(y) # depends on which is faster.
-                z_arr = comm.allgather(z) 
+                queue_idx += 1
 
-                a_arr = np.array(a_arr) # allgather returns a list, convert to array.
-                nx_arr = np.array(x_arr) / LCELL
-                ny_arr = np.array(y_arr) / LCELL
-                nz_arr = np.array(z_arr) / LCELL
+                if queue_idx < NPTS:
+                    continue
+                else:
+                    queue_idx = 0 # reset the queue index
 
-                bx = r # bx, by, bz are not necessarily equal to r, s, t. 
-                by = s # can modify this later to allow for more flexible
-                bz = t # task assignment.
-                phase = np.exp(
-                    -1j * (2 * np.pi / NTOT) * (bx * nx_arr + by * ny_arr + bz * nz_arr)    
-                )
+                    # synchronize and gather the queue to memory of each core
+                    a_arr = np.array(comm.allgather(a_queue), dtype=np.float32) # a_arr of shape [THREADS, NPTS, 3] all_gather add an axis in the front
+                    nx_arr = np.array(comm.allgather(x_queue), dtype=np.float32) / LCELL# or generate x_arr each cpu.
+                    ny_arr = np.array(comm.allgather(y_queue), dtype=np.float32) / LCELL# depends on which is faster.
+                    nz_arr = np.array(comm.allgather(z_queue), dtype=np.float32) / LCELL
 
-                f[i,j,k,:] = np.sum(a_arr * phase[:,None], axis=0) / m**1.5
+                    phase = np.exp(
+                        -1j * (2 * np.pi / NTOT) * (bx * nx_arr + by * ny_arr + bz * nz_arr)    
+                    ) # phase of shape [THREADS, NPT, 3]
+
+                    if f_idx + NPTS < Nbox**3:
+                        f[f_idx:f_idx+NPTS, :] = np.sum(a_arr * phase[:,None], axis=0) / m**1.5 # rhs shape (NPTS, 3)
+                        f_idx += NPTS # update the index of the first empty element in f array
+                    else:
+                        f[f_idx:, :] = np.sum(a_arr * phase[:,None], axis=0) / m**1.5
+                        f_idx = Nbox**3 # update to the end of the array. f_idx will not be used anymore
+
+    # f is constructed last index fastest, so C order can reconstruct to the 
+    # correct cube. C order is the default value of reshape btw.
+    f = np.reshape(f, (Nbox, Nbox, Nbox, 3), order='C') # reshape for FFT.
 
     # --------------------------------FFT---------------------------------------
     print(f'[{datetime.datetime.now()}] FFTW: {f.shape}')

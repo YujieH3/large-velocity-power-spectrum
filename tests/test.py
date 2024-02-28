@@ -17,5 +17,5 @@ result = comm.allgather(a)
 
 # Process 0 prints the result
 if rank == 0:
-    print('The element-wise sum of arrays on all processes is:', result, np.shape(result))
+    print(result, np.shape(result))
 
