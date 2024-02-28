@@ -27,7 +27,6 @@ import shutil
 
 # For error/warning control
 from sys import exit
-import warnings
 
 # For computation
 import subprocess
@@ -40,7 +39,7 @@ from voxelize import Voxelize
 Voxelize.__init__(self=Voxelize, use_gpu=False, network_dir=None)  # type: ignore
 
 pyfftw.interfaces.cache.enable()
-from vpower.spctrm import PowerSpectrum
+from spctrm import PowerSpectrum
 
 # For plotting
 import matplotlib.pyplot as plt
@@ -284,7 +283,8 @@ class GasParticles:
             Nsize, 
             smoothing_rate = 1.0,
             padding        = True,
-            edge_removal   = False):
+            edge_removal   = False,
+            nan_removal    = True):
         """Interpolate velocity using Voxelize by v = (m*v)_i/m_i.
 
         Issue
@@ -325,6 +325,11 @@ class GasParticles:
 
         v_grid = vec_grid[..., :3] / vec_grid[..., 3, None]     # divide by mass
         m_grid = vec_grid[..., 3] * Lcell**3                    # mass
+
+        # Warning: numpy selection could haul a lot of time
+        if nan_removal:
+            v_grid[np.isnan(v_grid)] = 0                            # remove NaNs
+            m_grid[np.isnan(m_grid)] = 0                            # remove NaNs
 
         if padding is True:
             v_grid = v_grid[:Nsize, :Nsize, :Nsize, :]

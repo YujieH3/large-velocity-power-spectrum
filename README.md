@@ -11,5 +11,14 @@ This code is aimed to calculate velocity, momentum, kinetic energy power spectru
 
 To run the code
 ```
-mpiexec -n 4 python parallel.py
+mpiexec -n 8 python parallel.py
 ```
+
+To enable memory profiler, run the code with
+```
+mpiexec -n 8 mpirun python -m memory_profiler parallel.py
+```
+
+## Benchmark
+
+On the same snapshot of ~ 10 million particles (9,619,086). 
