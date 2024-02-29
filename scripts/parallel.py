@@ -49,12 +49,12 @@ remove_bulk_velocity = True
 
 def vector_power(fx, fy, fz, Lbox, Nbox):
     """
-  Calculate FFT and power grid before sampling. This function does the main 
-  math and physics in power spectrum computation.
+    Calculate FFT and power grid before sampling. This function does the main 
+    math and physics in power spectrum computation.
 
-  Default normalization is such that
-  `np.sum(Pk*(2*np.pi/Lbox)**3)` and `0.5*np.mean(vx**2+vy**2+vz**2)` are equal
-  """
+    Default normalization is such that
+    `np.sum(Pk*(2*np.pi/Lbox)**3)` and `0.5*np.mean(vx**2+vy**2+vz**2)` are equal
+    """
     # Fourier transform
     a = (Lbox / (2 * np.pi)) ** 1.5 / Nbox ** 3
     fkx = pyfftw.interfaces.numpy_fft.fftn(fx, threads=1) * a # need to specify threads=1 or else mpi will raise an error
@@ -81,11 +81,11 @@ def FFTW_vector_power(fx, fy, fz, Lbox, Nsize, fft_object):
 
 def pair_power(Pk, Lbox, Nbox, shift=np.array([0, 0, 0])):
     """
-  Create pairs of power and k. Sampling in concentric spherical
-  shells with PkSample to get power spectrum. Called by PowerSpec3D.
-  This function is independent of the physics and definition of the
-  power spectrum
-  """
+    Create pairs of power and k. Sampling in concentric spherical
+    shells with PkSample to get power spectrum. Called by PowerSpec3D.
+    This function is independent of the physics and definition of the
+    power spectrum
+    """
     # Initialize k space
     Lcell = Lbox / float(Nbox)
     kSpace = 2 * np.pi * np.fft.fftfreq(Nbox, Lcell)

@@ -5,17 +5,18 @@ comm = MPI.COMM_WORLD
 size = comm.Get_size()
 rank = comm.Get_rank()
 
-# Each process has an array of size 10 with values equal to the rank of the process
-local_array = np.full(10, rank, dtype='i')
-print(f'Rank {rank} has local_array: {local_array}')
+from tqdm import tqdm
+import time
 
-# Create an empty array on the root process to hold the result
-a = np.ones((10, 3)) * rank
+# Create a progress bar with a total of 100\
+pbar = tqdm(total=100) if rank == 0 else None
 
-# Use Reduce to sum the arrays on all processes element-wise
-result = comm.allgather(a)
+for i in range(10):
+    # Do some work
+    time.sleep(0.1)
+    # Update the progress bar
+    pbar.update(0.5) if rank == 0 else None
 
-# Process 0 prints the result
-if rank == 0:
-    print(result, np.shape(result))
+# Close the progress bar
+pbar.close() if rank == 0 else None
 
