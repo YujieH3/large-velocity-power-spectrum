@@ -72,11 +72,11 @@ def FFTW_vector_power(fx, fy, fz, Lbox, Nsize, fft_object):
     # Fourier transform
     a = (Lbox / (2 * np.pi)) ** 1.5 / Nsize ** 3
     # Overwrite to save memory
-    fk = np.abs(fft_object(fx) * a) # fkx = fft_object(fx) * a
-    fk += np.abs(fft_object(fy) * a) # fky = fft_object(fy) * a
-    fk += np.abs(fft_object(fz) * a) # fkz = fft_object(fz) * a
+    fk = np.abs(fft_object(fx) * a)**2 # fkx = fft_object(fx) * a
+    fk += np.abs(fft_object(fy) * a)**2 # fky = fft_object(fy) * a
+    fk += np.abs(fft_object(fz) * a)**2 # fkz = fft_object(fz) * a
     # Definition of velocity power spectrum
-    return 0.5 * (fk) ** 2
+    return 0.5 * (fk)
 
 
 def pair_power(Pk, Lbox, Nbox, shift=np.array([0, 0, 0])):
@@ -216,15 +216,15 @@ if __name__ == '__main__':
                 z_arr = comm.allgather(z) 
 
                 a_arr = np.array(a_arr) # allgather returns a list, convert to array.
-                nx_arr = np.array(x_arr) / LCELL
-                ny_arr = np.array(y_arr) / LCELL
-                nz_arr = np.array(z_arr) / LCELL
+                x_arr = np.array(x_arr)
+                y_arr = np.array(y_arr)
+                z_arr = np.array(z_arr)
 
                 bx = r # bx, by, bz are not necessarily equal to r, s, t. 
                 by = s # can modify this later to allow for more flexible
                 bz = t # task assignment.
                 phase = np.exp(
-                    -1j * (2 * np.pi / NTOT) * (bx * nx_arr + by * ny_arr + bz * nz_arr)    
+                    -1j * (2 * np.pi / LTOT) * (bx * x_arr + by * y_arr + bz * z_arr)    
                 )
 
                 f[i,j,k,:] = np.sum(a_arr * phase[:,None], axis=0) / m**1.5
@@ -251,7 +251,7 @@ if __name__ == '__main__':
     # Use energy spectral density of dimension ~velocity^2/k
     Pkk[:, 1] *= 4 * np.pi * Pkk[:, 0] ** 2 # Pkk = (k, P, Psum, Nsample) of shape (n, 4)
     
-    Pkk = np.array(Pkk, dtype=np.float32) # convert to float64 for MPI
+    Pkk = np.array(Pkk, dtype=np.float32)
     p_sum = Pkk[:, 2].copy()
     n_sample = Pkk[:, 3].copy()    
 

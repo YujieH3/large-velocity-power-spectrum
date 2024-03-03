@@ -8,6 +8,7 @@ pyfftw.interfaces.cache.enable()
 
 from annoy import AnnoyIndex
 
+import argparse
 import tqdm # progress bar
 import sys # debug
 import os
@@ -42,55 +43,105 @@ cache (liberating any associated memory). The default keepalive time is 0.1
 seconds.
 """
 
-# ------------------------CONFIG------------------------
+# ------------------------------------CONFIG------------------------------------
 SNAPSHOT = '/appalachia/d5/DISK/from_pleiades/snapshots/gmcs0_wind0_gmc9/snapshot_550.hdf5'
-NTOT = 512 # total resolution. The dynamical range would be NTOT/2, from 2pi/NTOT to pi/LCELL
+NTOT = 128 # total resolution. The dynamical range would be NTOT/2, from 2pi/NTOT to pi/LCELL
+MAXNBOX = 32 # maximum box size allowed by memory
+
 LTOT = 1 # kpc
-NPTS = 1000 # number of points to query before synchronize.
-MAXNBOX = 256 # maximum box size allowed by memory
 
+NBUFFER = 2000 # number of points to query before synchronize.
 SAVEDIR = '.'
-REMOVECACHE = True
-
 
 remove_bulk_velocity = True
+# -----------------------------------PARSE ARGS---------------------------------
 
-# -----------------------FUNCTIONS----------------------
+parser = argparse.ArgumentParser(description="""Compute power spectrum in parallel. 
+                                 The program will make a plan and ask for permission 
+                                 before starting the computation.""",
+                                 usage='mpiexec -n <thread numbers> python %(prog)s [options]')
+parser.add_argument('-i', '--input', nargs='?',type=str, default=SNAPSHOT, help='Path to the snapshot file.')
+parser.add_argument('-o', '--output', nargs='?',type=str, default=SAVEDIR, help='Directory to save the power spectrum.')
+parser.add_argument('-N', '--ntot', nargs='?',type=int, default=NTOT, help='Total resolution.')
+parser.add_argument('-M', '--maxnbox', nargs='?',type=int, default=MAXNBOX, help='Maximum box size allowed by memory. A planner will decide the optimal box size.')
+parser.add_argument('-l', '--ltot', nargs='?',type=int, default=LTOT, help='Total length of the box.')
+parser.add_argument('-b', '--nbuffer', nargs='?',type=int, default=NBUFFER, help='Number of points to query before synchronize.')
+args = parser.parse_args()
+
+SNAPSHOT = args.input
+SAVEDIR  = args.output
+NTOT     = args.ntot
+MAXNBOX  = args.maxnbox
+LTOT     = args.ltot
+NBUFFER  = args.nbuffer
+
+# -----------------------------------FUNCTIONS----------------------------------
 
 
 def planner(n_total_res, l_total_length, n_box_affordable, n_total_threads):
-    m = math.cbrt(n_total_threads)  # number of threads in each dimension = the folding factor
-    assert m.is_integer()==True, 'Number of threads must be a cube of an integer. Support for any number is not yet implemented.'
-    m = int(m)
+    n_threads_per_axis = math.cbrt(n_total_threads)  # number of threads in each dimension = the folding factor
+    assert n_threads_per_axis.is_integer()==True, 'Number of threads must be a cube of an integer. Support for any number is not yet implemented.'
+    n_threads_per_axis = int(n_threads_per_axis)
 
-    n_loops = 1
-    Nfullbox = n_total_res / m
-    assert Nfullbox.is_integer()==True, 'Divided Nbox must be an integer.'
+    n_loops_per_axis = 1
+    n_full_box = n_total_res / n_threads_per_axis
+    assert n_full_box.is_integer()==True, 'Divided Nbox must be an integer.'
 
-    Nbox = Nfullbox
-    while Nbox > n_box_affordable or Nbox.is_integer()==False:
-        n_loops += 1
-        Nbox = Nfullbox / n_loops
-    Nbox = int(Nbox) # number of pixels in each dimension of the box
+    n_box = n_full_box
+    while n_box > n_box_affordable or n_box.is_integer()==False:
+        n_loops_per_axis += 1
+        n_box = n_full_box / n_loops_per_axis
+    n_loops = n_loops_per_axis**3
+    n_box = int(n_box) # number of pixels in each dimension of the box
 
-    Lbox = Nbox / n_total_res * l_total_length # length of the box
+    l_box = n_box / n_total_res * l_total_length # length of the box
 
-    return n_loops, m, Nbox, Lbox
+    return n_loops, n_threads_per_axis, n_box, l_box
 
 
-def FFTW_vector_power(fx, fy, fz, Lbox, Nsize, fft_object):
+def vector_power(fx, fy, fz, Lbox, Nbox):
+    """
+    Calculate FFT and power grid before sampling. This function does the main 
+    math and physics in power spectrum computation.
+
+    Default normalization is such that
+    `np.sum(Pk*(2*np.pi/Lbox)**3)` and `0.5*np.mean(vx**2+vy**2+vz**2)` are equal
+    """
+    # Fourier transform
+    const = (Lbox / (2 * np.pi)) ** 1.5 / Nbox ** 3
+    fkx = pyfftw.interfaces.numpy_fft.fftn(fx, threads=1) * const # need to specify threads=1 or else mpi will raise an error
+    fky = pyfftw.interfaces.numpy_fft.fftn(fy, threads=1) * const
+    fkz = pyfftw.interfaces.numpy_fft.fftn(fz, threads=1) * const
+    # Definition of velocity power spectrum
+    Pk = 0.5 * (np.abs(fkx) ** 2 + np.abs(fky) ** 2 + np.abs(fkz) ** 2)
+    return Pk
+
+def FFTW_vector_power(fx, fy, fz, Lbox, Nsize):
     """
     Same with vector_power, but using the fft_object to allow full power of 
     FFTW.
     """
     # Fourier transform
-    a = (Lbox / (2 * np.pi)) ** 1.5 / Nsize ** 3
-    # Overwrite to save memory
-    fk = np.abs(fft_object(fx) * a) # fkx = fft_object(fx) * a
-    fk += np.abs(fft_object(fy) * a) # fky = fft_object(fy) * a
-    fk += np.abs(fft_object(fz) * a) # fkz = fft_object(fz) * a
-    # Definition of velocity power spectrum
-    return 0.5 * (fk) ** 2
+    const = (Lbox / (2 * np.pi)) ** 1.5 / Nsize ** 3
+
+    a = pyfftw.empty_aligned((Nbox, Nbox, Nbox), dtype='complex64')
+    b = pyfftw.empty_aligned((Nbox, Nbox, Nbox), dtype='complex64')
+    fft_object = pyfftw.FFTW(a, b, axes=(0,1,2)) # input is a, output is b 
+    # maybe initialize f as an empty aligned array?
+    
+    a[:] = fx
+    fft_object()
+    fk = 0.5 * np.abs(b * const)**2
+
+    a[:] = fy
+    fft_object()
+    fk += 0.5 * np.abs(b * const)**2
+
+    a[:] = fz
+    fft_object()
+    fk += 0.5 * np.abs(b * const)**2
+
+    return fk
 
 
 def pair_power(Pk, Lbox, Nbox, shift=np.array([0, 0, 0])):
@@ -106,12 +157,12 @@ def pair_power(Pk, Lbox, Nbox, shift=np.array([0, 0, 0])):
     # Create k and power pairs
     kx, ky, kz = np.meshgrid(kSpace, kSpace, kSpace, indexing="ij")
     # Apply shift
-    if shift[0] > 0:
-        kx = kx + shift[0]
-    if shift[1] > 0:
-        ky = ky + shift[1]
-    if shift[2] > 0:
-        kz = kz + shift[2]
+    if shift[0] != 0:
+        kx = kx - shift[0] # shift is relative to f, k shifted by -i is f shifted by +i.
+    if shift[1] != 0:
+        ky = ky - shift[1]
+    if shift[2] != 0:
+        kz = kz - shift[2]
     #
     k = np.sqrt(kx*kx + ky*ky + kz*kz)
     # Construct a (n,2) shape array
@@ -128,19 +179,17 @@ def hist_sample(Pk_pair, kmin, kmax, spacing):
     n_bins = int((kmax - kmin) / spacing) + 1  # include kmin and kmax
     bin_centers = np.linspace(kmin, kmax, n_bins)
     bin_edges = np.linspace(kmin - spacing / 2, kmax + spacing / 2, n_bins + 1)
-    Psum, bin_edges_ = np.histogram(
-        Pk_pair[:, 0], bins=bin_edges, weights=Pk_pair[:, 1]
-    )
-    Nsample, bin_edges_ = np.histogram(Pk_pair[:, 0], bins=bin_edges)
-    P = Psum / Nsample
-    P[Nsample == 0] = 0  # Set P=0 if no sample
+    Psum, _ = np.histogram(Pk_pair[:, 0], bins=bin_edges, weights=Pk_pair[:, 1])
+    Nsample, _ = np.histogram(Pk_pair[:, 0], bins=bin_edges)
+    P = Psum / Nsample # might raise warning of division by zero
+    # But P is always set by Psum/Nsample and won't be used anywhere so we don't care
 
     Pvk = np.column_stack((bin_centers, P, Psum, Nsample))
 
     return Pvk
 
 
-####################################   MAIN   ##################################
+# -----------------------------------MAIN---------------------------------------
 if __name__ == '__main__':
 
     comm = MPI.COMM_WORLD
@@ -151,16 +200,34 @@ if __name__ == '__main__':
 
     # ------------------------------ALLOCATE WORK-------------------------------
     # Interpolation box assignment, with auto planner
-    # NTOT = n_threads * Nbox * n_loops
+    # NTOT = n_threads_per_axis * Nbox * n_loops
+    outputfile = os.path.join(SAVEDIR, 'Pk.txt')
     
-    n_loops, m, Nbox, Lbox = planner(NTOT, LTOT, MAXNBOX, NTHREADS)
-    
-    # Box index assignment
-    r = rank // m**2
-    s = (rank % m**2) // m
-    t = (rank % m) // 1
+    n_loops, n_threads_per_axis, Nbox, Lbox = planner(NTOT, LTOT, MAXNBOX, NTHREADS)
+    n = math.cbrt(n_loops) # spectrum smoothing in each dimension
+    n = int(n)
 
-    # Phase factor assignment
+    # Seperate NBUFFER into n_queue of n_loops
+    assert NBUFFER % n_loops == 0, 'NBUFFER must be divisible by n loops.'
+    n_queue = NBUFFER // n_loops
+
+    m = n_threads_per_axis * n # folding factor
+
+    # Box index assignment
+    r = n * (rank % n_threads_per_axis)
+    s = n * ((rank % n_threads_per_axis**2) // n_threads_per_axis)
+    t = n * (rank // n_threads_per_axis**2)
+
+    # Phase factor assignment. Because every queried point is needed for every FFT,
+    # if we cannot assign one chunk per core because of memory limit, we'll
+    # have to make each core to do the work of, say, 8 cores, to query 8 times before
+    # synchronize and assign phase and sum up. However if we also apply 8 phases
+    # and sum 8 times, we will have to save 8 times the memory, which is exactly
+    # what we want to avoid. It seems that there is no way around so we do only
+    # one FFT each core and hence get a slightly lower spectral resolution, but
+    # the same dynamical range. Or else we can do the same interpolation of 
+    # 10000**3 points 8 times, splitting to 1000 cores would only take 47*8 minutes
+    # actually. It's doable but not efficient. Let's see if the first option can work
     bx = r # bx, by, bz are not necessarily equal to r, s, t. and is assigned to each CPU
     by = s # can modify this later to allow for more flexible
     bz = t # task assignment.
@@ -174,14 +241,14 @@ if __name__ == '__main__':
         print('Plan confirmed. Starting computation.', flush=True)
     # print(f'Rank: {rank}, r: {r}, s: {s}, t: {t}, Nbox per box: {Nbox}')
 
-    pbar = tqdm.tqdm(total=100 * n_loops) if rank == 0 else None
+    pbar = tqdm.tqdm(total=100 * n_loops, ncols=50, bar_format='{l_bar}{bar}| [{elapsed}<{remaining}]') if rank == 0 else None
 
     # --------------------------------LOAD DATA---------------------------------
     print(f'[{datetime.datetime.now()}] Load snapshot: {SNAPSHOT}')
 
     f = h5py.File(SNAPSHOT, 'r')
-    coords = f["PartType0/Coordinates"][:] # of shape (N, 3) # type: ignore
-    mass = f["PartType0/Masses"][:] # type: ignore
+    coords   = f["PartType0/Coordinates"][:] # of shape (N, 3) # type: ignore
+    mass     = f["PartType0/Masses"][:] # type: ignore
     velocity = f["PartType0/Velocities"][:] # type: ignore
     f.close()
 
@@ -197,12 +264,12 @@ if __name__ == '__main__':
         velocity[:, 0] -= np.sum(mass * velocity[:, 0]) / M # type: ignore
         velocity[:, 1] -= np.sum(mass * velocity[:, 1]) / M # type: ignore
         velocity[:, 2] -= np.sum(mass * velocity[:, 2]) / M # type: ignore
-        # free memory. python garbage collector will take care of this, but not immediately.
+        # free memory. python garbage collector will take care of this after.
         mass = None
         M = None
 
     # --------------------------------BUILD INDEX-------------------------------
-    print(f'[{datetime.datetime.now()}] Build index: {coords.shape}') # type: ignore
+    print(f'[{datetime.datetime.now()}] Build index: {coords.shape}') # type: ignore # TODO save and load index
     ann_idx = AnnoyIndex(3, 'euclidean')  # Length of item vector that will be indexed
     for i in range(len(coords)): # Can distribute to threads. # type: ignore
         ann_idx.add_item(i, coords[i]) # type: ignore
@@ -210,7 +277,7 @@ if __name__ == '__main__':
     ann_idx.build(1, n_jobs=-1) # use all available threads? Seems to be using only 1.
     print(f'[{datetime.datetime.now()}] Tree built')
 
-    pbar.update(5) if rank == 0 else None
+    pbar.update(5) if rank == 0 else None # type:ignore
 
     # sys.exit(0)
     # --------------------------------QUERY-------------------------------------
@@ -220,140 +287,141 @@ if __name__ == '__main__':
     # where Nbox is the largest integer < Nmaxbox that keeps n_loops an integer.
     # So it's a factorization problem of NTOT/m.
     
-    for lp in range(n_loops):
+    bidx = 0
+    for nb1 in range(n):
+        for nb2 in range(n):
+            for nb3 in range(n):
+                qidx = 0
+                f_idx = 0 # index track the index of the first empty element in f array
+                a_queue = np.empty((n_loops, n_queue, 3), dtype=np.float32)
+                x_queue = np.empty((n_loops, n_queue), dtype=np.float32)
+                y_queue = np.empty((n_loops, n_queue), dtype=np.float32)
+                z_queue = np.empty((n_loops, n_queue), dtype=np.float32)
+                f = np.empty((Nbox**3, 3), dtype=np.complex64) # folded field with phase.
+                for i in range(Nbox):
+                    for j in range(Nbox):
+                        for k in range(Nbox):
+                            iidx = 0
+                            for n1 in range(n): 
+                                for n2 in range(n):
+                                    for n3 in range(n): # the art of for loops
+                                        # TODO make a loop to query some points before synchronize
+                                        # One tradeoff: more points queried at once, less communication,
+                                        # less time needed, but more memory usage. Make it a tunable parameter.
+                                        x = ((r+n1) * Nbox + i) * LCELL
+                                        y = ((s+n2) * Nbox + j) * LCELL
+                                        z = ((t+n3) * Nbox + k) * LCELL
+                                        query = np.array([x, y, z], dtype=np.float32) # specific location to query, dependent on rank
 
-        queue_idx = 0
-        f_idx = 0 # index track the index of the first empty element in f array
-        x_queue = np.empty(NPTS, dtype=np.float32)
-        y_queue = np.empty(NPTS, dtype=np.float32)
-        z_queue = np.empty(NPTS, dtype=np.float32)
-        a_queue = np.empty((NPTS, 3), dtype=np.float32)
-        f = np.empty((Nbox**3, 3), dtype=np.complex64) # folded field with phase.
-        for i in range(Nbox):
-            for j in range(Nbox):
-                for k in range(Nbox):
-                    # TODO make a loop to query some points before synchronize
-                    # One tradeoff: more points queried at once, less communication,
-                    # less time needed, but more memory usage. Make it a tunable parameter.
-                    x = (r * Nbox + i) * LCELL
-                    y = (s * Nbox + j) * LCELL
-                    z = (t * Nbox + k) * LCELL
+                                        nb = ann_idx.get_nns_by_vector(query, n=1, search_k=-1, # type: ignore
+                                                                    include_distances=False) 
+                                        # print(nb) # of shape (1,) because we query only the 1 nearest neighbor, and doesn't include distance
+                                        a = velocity[nb[0]] # type: ignore # extract the velocity of corresponding index
+                                        
+                                        a_queue[iidx, qidx] = a
+                                        x_queue[iidx, qidx] = x
+                                        y_queue[iidx, qidx] = y
+                                        z_queue[iidx, qidx] = z
 
-                    query = np.array([x, y, z], dtype=np.float32) # specific location to query, dependent on rank
-                    # print(f'Rank: {rank}, query: {query} of shape {query.shape}')
-                    nb = ann_idx.get_nns_by_vector(query, n=1, search_k=-1, 
-                                                include_distances=False) # type: ignore
-                    # print(nb) # of shape (1,) because we query only the 1 nearest neighbor, and doesn't include distance
-                    a = velocity[nb[0]] # type: ignore # extract the velocity of corresponding index
+                                        iidx += 1
+                            qidx += 1
 
-                    
-                    a_queue[queue_idx] = a
-                    x_queue[queue_idx] = x
-                    y_queue[queue_idx] = y
-                    z_queue[queue_idx] = z
+                            if qidx >= n_queue or qidx + f_idx >= Nbox**3:
+                                qidx = 0 # reset the queue index
+                                # synchronize and gather the queue to memory of each core
+                                a_arr = np.array(comm.allgather(a_queue), dtype=np.float32) # a_arr of shape [NTHREADS, n_loops, NBUFFER, 3] all_gather add an axis in the front
+                                x_arr = np.array(comm.allgather(x_queue), dtype=np.float32)# or generate x_arr each cpu.
+                                y_arr = np.array(comm.allgather(y_queue), dtype=np.float32)# depends on which is faster.
+                                z_arr = np.array(comm.allgather(z_queue), dtype=np.float32)
+                                
+                                a_arr = a_arr.reshape(NTHREADS*n_loops, n_queue, 3) # last variable changing fastest.
+                                x_arr = x_arr.reshape(NTHREADS*n_loops, n_queue) 
+                                y_arr = y_arr.reshape(NTHREADS*n_loops, n_queue) # Tested to work
+                                z_arr = z_arr.reshape(NTHREADS*n_loops, n_queue)
 
-                    queue_idx += 1
+                                # This phase application is infact an FFT of some sort.
+                                # TODO use fft here to speed things up
+                                phase = np.exp(
+                                    -1j * (2 * np.pi / LTOT) * ((bx+nb1) * x_arr + (by+nb2) * y_arr + (bz+nb3) * z_arr)    # x, y, z / L or nx, ny, nz / N
+                                ) # phase of shape [NTHREADS, NBUFFER]
 
-                    if queue_idx < NPTS:
-                        continue
-                    else:
-                        queue_idx = 0 # reset the queue index
+                                if f_idx + n_queue < Nbox**3:
+                                    f[f_idx:f_idx+n_queue, :] = np.sum(a_arr * phase[...,None], axis=0) / m**1.5 # shape (NBUFFER, 3)
+                                    f_idx += n_queue # update the index of the first empty element in f array
+                                    pbar.update(NBUFFER / (Nbox**3) * 80) if rank == 0 else None # type: ignore
+                                else:
+                                    temp_idx = Nbox**3 - f_idx
+                                    f[f_idx:, :] = np.sum(a_arr[:,:temp_idx,:] * phase[:,:temp_idx,None], axis=0) / m**1.5 # indices after leftover are from the precious loop
+                                    f_idx = Nbox**3 # update to the end of the array. f_idx will not be used anymore
+                                    pbar.update(temp_idx / (Nbox**3) * 80) if rank == 0 else None # type: ignore
+                            else:
+                                continue
+                # f is constructed last index fastest, so C order can reconstruct to the 
+                # correct cube. C order is the default value of reshape btw.
+                f = np.reshape(f, (Nbox, Nbox, Nbox, 3), order='C') # reshape for FFT.
 
-                        # synchronize and gather the queue to memory of each core
-                        a_arr = np.array(comm.allgather(a_queue), dtype=np.float32) # a_arr of shape [NTHREADS, NPTS, 3] all_gather add an axis in the front
-                        nx_arr = np.array(comm.allgather(x_queue), dtype=np.float32) / LCELL# or generate x_arr each cpu.
-                        ny_arr = np.array(comm.allgather(y_queue), dtype=np.float32) / LCELL# depends on which is faster.
-                        nz_arr = np.array(comm.allgather(z_queue), dtype=np.float32) / LCELL
+                # ----------------------------FFT-------------------------------
+                print(f'[{datetime.datetime.now()}] FFTW: {f.shape}')
 
-                        phase = np.exp(
-                            -1j * (2 * np.pi / NTOT) * (bx * nx_arr + by * ny_arr + bz * nz_arr)    
-                        ) # phase of shape [NTHREADS, NPTS]
+                # TODO save plan if doesn't exist, read if it exists
+                P = FFTW_vector_power(f[:,:,:,0], f[:,:,:,1], f[:,:,:,2], Lbox, Nbox)
+                print(f'[{datetime.datetime.now()}] FFTW finished: {P.shape}')
 
-                        if f_idx + NPTS < Nbox**3:
-                            f[f_idx:f_idx+NPTS, :] = np.sum(a_arr * phase[...,None], axis=0) / m**1.5 # shape (NPTS, 3)
-                            f_idx += NPTS # update the index of the first empty element in f array
-                            pbar.update(round(NPTS / (Nbox**3) * 80, ndigits=2)) if rank == 0 else None
-                        else:
-                            f[f_idx:, :] = np.sum(a_arr * phase[...,None], axis=0) / m**1.5
-                            f_idx = Nbox**3 # update to the end of the array. f_idx will not be used anymore
-                            pbar.update(round(len(a_arr) / (Nbox**3) * 80, ndigits=2)) if rank == 0 else None
+                pbar.update(10) if rank == 0 else None # update progress bar # type: ignore
+                
+                # ---------------------------SAMPLE-----------------------------
 
-        # f is constructed last index fastest, so C order can reconstruct to the 
-        # correct cube. C order is the default value of reshape btw.
-        f = np.reshape(f, (Nbox, Nbox, Nbox, 3), order='C') # reshape for FFT.
+                # Sampling k in concentric spheres
+                Pk = pair_power(P, Lbox, Nbox, shift=-2*np.pi*np.array([bx+nb1, by+nb2, bz+nb3])/LTOT)
+                print(f'[{datetime.datetime.now()}] Pk: {Pk.shape}')
 
-        # --------------------------------FFT-----------------------------------
-        print(f'[{datetime.datetime.now()}] FFTW: {f.shape}')
+                # Sample power spectrum P(k), from the fundamental mode to the Nyquist frequency (half frequency of the smallest scale)
+                Pkk = hist_sample(Pk, kmin=2*np.pi/LTOT, kmax=np.pi/LCELL, spacing=2*np.pi/LTOT) # Pkk = (k, P, Psum, Nsample) of shape (NTOT, 4)
+                # Use energy spectral density of dimension ~velocity^2/k
+                Pkk[:, 1] *= 4 * np.pi * Pkk[:, 0] ** 2 
+                
+                Pkk = np.array(Pkk, dtype=np.float32) # use float32
+                p_sum = Pkk[:, 2].copy()
+                n_sample = Pkk[:, 3].copy()    
 
-        a = pyfftw.empty_aligned((Nbox, Nbox, Nbox), dtype='complex64')
-        b = pyfftw.empty_aligned((Nbox, Nbox, Nbox), dtype='complex64')
-        fft_object = pyfftw.builders.fftn(a, threads=1)
+                # print(f'[{datetime.datetime.now()}] Pkk: {Pkk.shape}')
 
-        P = FFTW_vector_power(f[:,:,:,0], f[:,:,:,1], f[:,:,:,2], Lbox, Nbox, fft_object)
+                # ---------------------------COMBINE----------------------------
+                if rank == 0: # allocate memory for the total sum. It couldn't work on Pkk[:, 2] directly
+                    n_pk = len(Pkk)
+                    p_sum_tot = np.empty(n_pk, dtype=np.float32)
+                    n_sample_tot = np.empty(n_pk, dtype=np.float32)
+                else:
+                    p_sum_tot = None
+                    n_sample_tot = None
 
-        print(f'[{datetime.datetime.now()}] FFTW finished: {P.shape}')
+                comm.Reduce(sendbuf=p_sum, recvbuf=p_sum_tot, op=MPI.SUM, root=0) # sum up all power spectra to rank 0
+                comm.Reduce(sendbuf=n_sample, recvbuf=n_sample_tot, op=MPI.SUM, root=0)
+                
+                if rank == 0:
+                    Pkk[:, 2] = p_sum_tot
+                    Pkk[:, 3] = n_sample_tot
+                    Pkk[:, 1] = Pkk[:, 2] / Pkk[:, 3] * (4 * np.pi * Pkk[:, 0] ** 2)
+                    # print(f'[{datetime.datetime.now()}] Pkk: {Pkk.shape}')
+                
+                # ----------------------------SAVE------------------------------
+                
+                if rank == 0 and bidx == 0:
+                    np.savetxt(outputfile, Pkk) # save however you want. Let's make a simple text file for now.
+                    print(f'[{datetime.datetime.now()}] Saved: {outputfile}')
+                elif rank == 0 and bidx > 0:
+                    Pkk_tot = np.loadtxt(outputfile)
+                    Pkk_tot[:, 2] += Pkk[:, 2]
+                    Pkk_tot[:, 3] += Pkk[:, 3]
+                    Pkk_tot[:, 1] = Pkk_tot[:, 2] / Pkk_tot[:, 3] * (4 * np.pi * Pkk_tot[:, 0] ** 2)
+                    np.savetxt(outputfile, Pkk_tot)
+                    print(f'[{datetime.datetime.now()}] Combined and saved: {Pkk.shape}')
 
-        pbar.update(10) if rank == 0 else None # update progress bar
-        # -------------------------------COMBINE--------------------------------
+                pbar.update(5) if rank == 0 else None # update progress bar # type: ignore
 
-        # Sampling k in concentric spheres
-        Pk = pair_power(P, Lbox, Nbox, shift=2*np.pi*np.array([bx, by, bz])/LTOT)
-        print(f'[{datetime.datetime.now()}] Pk: {Pk.shape}')
+                bidx += 1
 
-        # Sample power spectrum P(k), from the fundamental mode to the Nyquist frequency (half frequency of the smallest scale)
-        Pkk = hist_sample(Pk, kmin=2*np.pi/LTOT, kmax=np.pi/LCELL, spacing=2*np.pi/LTOT)
-        # Use energy spectral density of dimension ~velocity^2/k
-        Pkk[:, 1] *= 4 * np.pi * Pkk[:, 0] ** 2 # Pkk = (k, P, Psum, Nsample) of shape (n, 4)
-        
-        Pkk = np.array(Pkk, dtype=np.float32) # convert to float64 for MPI
-        p_sum = Pkk[:, 2].copy()
-        n_sample = Pkk[:, 3].copy()    
-
-        print(f'[{datetime.datetime.now()}] Pkk: {Pkk.shape}')
-
-        if rank == 0: # allocate memory for the total sum. It couldn't work on Pkk[:, 2] directly
-            n_pk = len(Pkk)
-            p_sum_tot = np.empty(n_pk, dtype=np.float32)
-            n_sample_tot = np.empty(n_pk, dtype=np.float32)
-        else:
-            p_sum_tot = None
-            n_sample_tot = None
-
-        comm.Reduce(sendbuf=p_sum, recvbuf=p_sum_tot, op=MPI.SUM, root=0) # sum up all power spectra to rank 0
-        comm.Reduce(sendbuf=n_sample, recvbuf=n_sample_tot, op=MPI.SUM, root=0)
-        
-        if rank == 0:
-            Pkk[:, 2] = p_sum_tot
-            Pkk[:, 3] = n_sample_tot
-            Pkk[:, 1] = Pkk[:, 2] / Pkk[:, 3] * (4 * np.pi * Pkk[:, 0] ** 2)
-            print(f'[{datetime.datetime.now()}] Pkk: {Pkk.shape}')
-        
-        # --------------------------------SAVE----------------------------------
-        if rank == 0 and n_loops == 1:
-            print(f'[{datetime.datetime.now()}] Save: {Pkk.shape}')
-            np.savetxt(os.path.join(SAVEDIR, 'Pk.txt'), Pkk) # save however you want. Let's make a simple text file for now.
-        elif rank == 0 and n_loops > 1:
-            print(f'[{datetime.datetime.now()}] Save: {Pkk.shape}')
-            np.savetxt(os.path.join(SAVEDIR, f'Pk{lp}.txt'), Pkk)
-
-        pbar.update(4) if rank == 0 else None # update progress bar
-
-    if rank == 0 and n_loops > 1: # Combine different loops if applicable
-        for lp in range(n_loops):
-            Pkk = np.loadtxt(os.path.join(SAVEDIR, f'Pk{lp}.txt'))
-            if lp == 0:
-                Pkk_tot = Pkk
-            else:
-                Pkk_tot[:, 2] += Pkk[:, 2]
-                Pkk_tot[:, 3] += Pkk[:, 3]
-            if REMOVECACHE:
-                os.remove(os.path.join(SAVEDIR, f'Pk{lp}.txt'))
-            pbar.update(1) # update progress bar
-        Pkk_tot[:, 1] = Pkk_tot[:, 2] / Pkk_tot[:, 3] * (4 * np.pi * Pkk_tot[:, 0] ** 2)
-        np.savetxt(os.path.join(SAVEDIR, 'Pk.txt'), Pkk_tot)
-
-    # Close the progress bar. Sum of all updates should be 100(n_loops).
-    pbar.close() if rank == 0 else None
+    pbar.close() if rank == 0 else None # type: ignore
 
 
 
