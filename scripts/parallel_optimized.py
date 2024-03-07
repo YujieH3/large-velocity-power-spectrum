@@ -13,6 +13,7 @@ import tqdm # progress bar
 import sys # debug
 import os
 import datetime # benchmarking
+import gc # garbage collection
 
 # TODO numba acceleration of the loop? No the loop is not the bottleneck. Possibly the synchronize
 # SOLVED the fftw threading bug? Turns out to be a conda package issue.
@@ -44,14 +45,15 @@ seconds.
 """
 
 # ------------------------------------CONFIG------------------------------------
-SNAPSHOT = '/appalachia/d5/DISK/from_pleiades/snapshots/gmcs0_wind0_gmc9/snapshot_550.hdf5'
+SNAPSHOT = '/appalachia/d5/DISK/from_pleiades/snapshots/gmcs0_wind4_gmc9/snapshot_550.hdf5'
+# '/appalachia/d5/DISK/from_pleiades/snapshots/gmcs0_wind0_gmc9/snapshot_550.hdf5'
 NTOT = 128 # total resolution. The dynamical range would be NTOT/2, from 2pi/NTOT to pi/LCELL
 MAXNBOX = 32 # maximum box size allowed by memory
 
 LTOT = 1 # kpc
 
 NBUFFER = 2000 # number of points to query before synchronize.
-SAVEDIR = '.'
+SAVEDIR = '../output/'
 
 remove_bulk_velocity = True
 # -----------------------------------PARSE ARGS---------------------------------
@@ -99,22 +101,22 @@ def planner(n_total_res, l_total_length, n_box_affordable, n_total_threads):
     return n_loops, n_threads_per_axis, n_box, l_box
 
 
-def vector_power(fx, fy, fz, Lbox, Nbox):
-    """
-    Calculate FFT and power grid before sampling. This function does the main 
-    math and physics in power spectrum computation.
+# def vector_power(fx, fy, fz, Lbox, Nbox):
+#     """
+#     Calculate FFT and power grid before sampling. This function does the main 
+#     math and physics in power spectrum computation.
 
-    Default normalization is such that
-    `np.sum(Pk*(2*np.pi/Lbox)**3)` and `0.5*np.mean(vx**2+vy**2+vz**2)` are equal
-    """
-    # Fourier transform
-    const = (Lbox / (2 * np.pi)) ** 1.5 / Nbox ** 3
-    fkx = pyfftw.interfaces.numpy_fft.fftn(fx, threads=1) * const # need to specify threads=1 or else mpi will raise an error
-    fky = pyfftw.interfaces.numpy_fft.fftn(fy, threads=1) * const
-    fkz = pyfftw.interfaces.numpy_fft.fftn(fz, threads=1) * const
-    # Definition of velocity power spectrum
-    Pk = 0.5 * (np.abs(fkx) ** 2 + np.abs(fky) ** 2 + np.abs(fkz) ** 2)
-    return Pk
+#     Default normalization is such that
+#     `np.sum(Pk*(2*np.pi/Lbox)**3)` and `0.5*np.mean(vx**2+vy**2+vz**2)` are equal
+#     """
+#     # Fourier transform
+#     const = (Lbox / (2 * np.pi)) ** 1.5 / Nbox ** 3
+#     fkx = pyfftw.interfaces.numpy_fft.fftn(fx, threads=1) * const # need to specify threads=1 or else mpi will raise an error
+#     fky = pyfftw.interfaces.numpy_fft.fftn(fy, threads=1) * const
+#     fkz = pyfftw.interfaces.numpy_fft.fftn(fz, threads=1) * const
+#     # Definition of velocity power spectrum
+#     Pk = 0.5 * (np.abs(fkx) ** 2 + np.abs(fky) ** 2 + np.abs(fkz) ** 2)
+#     return Pk
 
 def FFTW_vector_power(fx, fy, fz, Lbox, Nsize):
     """
@@ -130,16 +132,19 @@ def FFTW_vector_power(fx, fy, fz, Lbox, Nsize):
     # maybe initialize f as an empty aligned array?
     
     a[:] = fx
-    fft_object()
+    fft_object() # the result is stored in b
     fk = 0.5 * np.abs(b * const)**2
+    del fx
 
     a[:] = fy
     fft_object()
     fk += 0.5 * np.abs(b * const)**2
+    del fy
 
     a[:] = fz
     fft_object()
     fk += 0.5 * np.abs(b * const)**2
+    del fz
 
     return fk
 
@@ -202,6 +207,8 @@ if __name__ == '__main__':
     # Interpolation box assignment, with auto planner
     # NTOT = n_threads_per_axis * Nbox * n_loops
     outputfile = os.path.join(SAVEDIR, 'Pk.txt')
+    assert os.path.isdir(SAVEDIR), 'Output directory does not exist.'
+    assert os.path.isfile(SNAPSHOT), 'Snapshot file does not exist.'
     
     n_loops, n_threads_per_axis, Nbox, Lbox = planner(NTOT, LTOT, MAXNBOX, NTHREADS)
     n = math.cbrt(n_loops) # spectrum smoothing in each dimension
@@ -265,18 +272,24 @@ if __name__ == '__main__':
         velocity[:, 1] -= np.sum(mass * velocity[:, 1]) / M # type: ignore
         velocity[:, 2] -= np.sum(mass * velocity[:, 2]) / M # type: ignore
         # free memory. python garbage collector will take care of this after.
-        mass = None
-        M = None
+        del mass, M
 
     # --------------------------------BUILD INDEX-------------------------------
     print(f'[{datetime.datetime.now()}] Build index: {coords.shape}') # type: ignore # TODO save and load index
-    ann_idx = AnnoyIndex(3, 'euclidean')  # Length of item vector that will be indexed
-    for i in range(len(coords)): # Can distribute to threads. # type: ignore
-        ann_idx.add_item(i, coords[i]) # type: ignore
-    print(f'[{datetime.datetime.now()}] Index added')
-    ann_idx.build(1, n_jobs=-1) # use all available threads? Seems to be using only 1.
-    print(f'[{datetime.datetime.now()}] Tree built')
-
+    
+    indexfile = os.path.join(SAVEDIR, 'index.ann')
+    if os.path.isfile(indexfile):
+        ann_idx = AnnoyIndex(3, 'euclidean')
+        ann_idx.load(indexfile)
+        print(f'[{datetime.datetime.now()}] Index loaded')
+    else:
+        ann_idx = AnnoyIndex(3, 'euclidean')  # Length of item vector that will be indexed
+        for i in range(len(coords)): # Can distribute to threads. # type: ignore
+            ann_idx.add_item(i, coords[i]) # type: ignore
+        # print(f'[{datetime.datetime.now()}] Index added')
+        ann_idx.build(1, n_jobs=-1) # use all available threads? Seems to be using only 1.
+        ann_idx.save(indexfile)
+        print(f'[{datetime.datetime.now()}] Index built')
     pbar.update(5) if rank == 0 else None # type:ignore
 
     # sys.exit(0)
@@ -348,7 +361,7 @@ if __name__ == '__main__':
                                 if f_idx + n_queue < Nbox**3:
                                     f[f_idx:f_idx+n_queue, :] = np.sum(a_arr * phase[...,None], axis=0) / m**1.5 # shape (NBUFFER, 3)
                                     f_idx += n_queue # update the index of the first empty element in f array
-                                    pbar.update(NBUFFER / (Nbox**3) * 80) if rank == 0 else None # type: ignore
+                                    pbar.update(n_queue / (Nbox**3) * 80) if rank == 0 else None # type: ignore
                                 else:
                                     temp_idx = Nbox**3 - f_idx
                                     f[f_idx:, :] = np.sum(a_arr[:,:temp_idx,:] * phase[:,:temp_idx,None], axis=0) / m**1.5 # indices after leftover are from the precious loop
@@ -356,6 +369,11 @@ if __name__ == '__main__':
                                     pbar.update(temp_idx / (Nbox**3) * 80) if rank == 0 else None # type: ignore
                             else:
                                 continue
+
+                
+                del a_queue, x_queue, y_queue, z_queue # free memory
+                gc.collect() # garbage collection
+
                 # f is constructed last index fastest, so C order can reconstruct to the 
                 # correct cube. C order is the default value of reshape btw.
                 f = np.reshape(f, (Nbox, Nbox, Nbox, 3), order='C') # reshape for FFT.
@@ -365,6 +383,7 @@ if __name__ == '__main__':
 
                 # TODO save plan if doesn't exist, read if it exists
                 P = FFTW_vector_power(f[:,:,:,0], f[:,:,:,1], f[:,:,:,2], Lbox, Nbox)
+
                 print(f'[{datetime.datetime.now()}] FFTW finished: {P.shape}')
 
                 pbar.update(10) if rank == 0 else None # update progress bar # type: ignore
@@ -419,7 +438,9 @@ if __name__ == '__main__':
 
                 pbar.update(5) if rank == 0 else None # update progress bar # type: ignore
 
-                bidx += 1
+                bidx += 1 # beta index for the big loop
+
+                gc.collect() # garbage collection
 
     pbar.close() if rank == 0 else None # type: ignore
 
