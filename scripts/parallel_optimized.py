@@ -14,6 +14,7 @@ import sys # debug
 import os
 import datetime # benchmarking
 import gc # garbage collection
+from memory_profiler import profile
 
 # TODO numba acceleration of the loop? No the loop is not the bottleneck. Possibly the synchronize
 # SOLVED the fftw threading bug? Turns out to be a conda package issue.
@@ -45,14 +46,14 @@ seconds.
 """
 
 # ------------------------------------CONFIG------------------------------------
-SNAPSHOT = '/appalachia/d5/DISK/from_pleiades/snapshots/gmcs0_wind4_gmc9/snapshot_550.hdf5'
+SNAPSHOT = '/appalachia/d5/DISK/from_pleiades/snapshots/gmcs0_wind0_gmc9/snapshot_550.hdf5'
 # '/appalachia/d5/DISK/from_pleiades/snapshots/gmcs0_wind0_gmc9/snapshot_550.hdf5'
-NTOT = 128 # total resolution. The dynamical range would be NTOT/2, from 2pi/NTOT to pi/LCELL
-MAXNBOX = 32 # maximum box size allowed by memory
+NTOT = 1000 # total resolution. The dynamical range would be NTOT/2, from 2pi/NTOT to pi/LCELL
+MAXNBOX = 500 # maximum box size allowed by memory
 
 LTOT = 1 # kpc
 
-NBUFFER = 2000 # number of points to query before synchronize.
+NBUFFER = 10000 # number of points to query before synchronize.
 SAVEDIR = '../output/'
 
 remove_bulk_velocity = True
@@ -118,6 +119,7 @@ def planner(n_total_res, l_total_length, n_box_affordable, n_total_threads):
 #     Pk = 0.5 * (np.abs(fkx) ** 2 + np.abs(fky) ** 2 + np.abs(fkz) ** 2)
 #     return Pk
 
+@profile
 def FFTW_vector_power(fx, fy, fz, Lbox, Nsize):
     """
     Same with vector_power, but using the fft_object to allow full power of 
@@ -126,8 +128,8 @@ def FFTW_vector_power(fx, fy, fz, Lbox, Nsize):
     # Fourier transform
     const = (Lbox / (2 * np.pi)) ** 1.5 / Nsize ** 3
 
-    a = pyfftw.empty_aligned((Nbox, Nbox, Nbox), dtype='complex64')
-    b = pyfftw.empty_aligned((Nbox, Nbox, Nbox), dtype='complex64')
+    a = pyfftw.empty_aligned((Nsize, Nsize, Nsize), dtype='complex64')
+    b = pyfftw.empty_aligned((Nsize, Nsize, Nsize), dtype='complex64')
     fft_object = pyfftw.FFTW(a, b, axes=(0,1,2)) # input is a, output is b 
     # maybe initialize f as an empty aligned array?
     
@@ -195,8 +197,9 @@ def hist_sample(Pk_pair, kmin, kmax, spacing):
 
 
 # -----------------------------------MAIN---------------------------------------
-if __name__ == '__main__':
 
+@profile
+def main():
     comm = MPI.COMM_WORLD
     rank = comm.Get_rank() # thread number
     NTHREADS = comm.Get_size() # number of threads
@@ -288,7 +291,8 @@ if __name__ == '__main__':
             ann_idx.add_item(i, coords[i]) # type: ignore
         # print(f'[{datetime.datetime.now()}] Index added')
         ann_idx.build(1, n_jobs=-1) # use all available threads? Seems to be using only 1.
-        ann_idx.save(indexfile)
+        if rank == 0 and os.path.isfile(indexfile)==False:
+            ann_idx.save(indexfile)
         print(f'[{datetime.datetime.now()}] Index built')
     pbar.update(5) if rank == 0 else None # type:ignore
 
@@ -318,7 +322,6 @@ if __name__ == '__main__':
                             for n1 in range(n): 
                                 for n2 in range(n):
                                     for n3 in range(n): # the art of for loops
-                                        # TODO make a loop to query some points before synchronize
                                         # One tradeoff: more points queried at once, less communication,
                                         # less time needed, but more memory usage. Make it a tunable parameter.
                                         x = ((r+n1) * Nbox + i) * LCELL
@@ -393,9 +396,12 @@ if __name__ == '__main__':
                 # Sampling k in concentric spheres
                 Pk = pair_power(P, Lbox, Nbox, shift=-2*np.pi*np.array([bx+nb1, by+nb2, bz+nb3])/LTOT)
                 print(f'[{datetime.datetime.now()}] Pk: {Pk.shape}')
+                del P
 
                 # Sample power spectrum P(k), from the fundamental mode to the Nyquist frequency (half frequency of the smallest scale)
                 Pkk = hist_sample(Pk, kmin=2*np.pi/LTOT, kmax=np.pi/LCELL, spacing=2*np.pi/LTOT) # Pkk = (k, P, Psum, Nsample) of shape (NTOT, 4)
+                del Pk
+                
                 # Use energy spectral density of dimension ~velocity^2/k
                 Pkk[:, 1] *= 4 * np.pi * Pkk[:, 0] ** 2 
                 
@@ -444,6 +450,8 @@ if __name__ == '__main__':
 
     pbar.close() if rank == 0 else None # type: ignore
 
+if __name__ == '__main__':
+    main()
 
 
 
