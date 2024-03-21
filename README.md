@@ -11,7 +11,7 @@ This code is aimed to calculate velocity, momentum and kinetic energy power spec
 
 To run the code
 ```
-mpiexec -n 8 python ./scripts/parallel_optimized.py
+mpiexec -n <number of cores> python ./scripts/parallel_optimized.py
 ```
 
 

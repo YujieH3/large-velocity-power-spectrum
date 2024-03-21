@@ -102,24 +102,7 @@ def planner(n_total_res, l_total_length, n_box_affordable, n_total_threads):
     return n_loops, n_threads_per_axis, n_box, l_box
 
 
-# def vector_power(fx, fy, fz, Lbox, Nbox):
-#     """
-#     Calculate FFT and power grid before sampling. This function does the main 
-#     math and physics in power spectrum computation.
-
-#     Default normalization is such that
-#     `np.sum(Pk*(2*np.pi/Lbox)**3)` and `0.5*np.mean(vx**2+vy**2+vz**2)` are equal
-#     """
-#     # Fourier transform
-#     const = (Lbox / (2 * np.pi)) ** 1.5 / Nbox ** 3
-#     fkx = pyfftw.interfaces.numpy_fft.fftn(fx, threads=1) * const # need to specify threads=1 or else mpi will raise an error
-#     fky = pyfftw.interfaces.numpy_fft.fftn(fy, threads=1) * const
-#     fkz = pyfftw.interfaces.numpy_fft.fftn(fz, threads=1) * const
-#     # Definition of velocity power spectrum
-#     Pk = 0.5 * (np.abs(fkx) ** 2 + np.abs(fky) ** 2 + np.abs(fkz) ** 2)
-#     return Pk
-
-@profile
+# @profile
 def FFTW_vector_power(fx, fy, fz, Lbox, Nsize):
     """
     Same with vector_power, but using the fft_object to allow full power of 
@@ -135,18 +118,18 @@ def FFTW_vector_power(fx, fy, fz, Lbox, Nsize):
     
     a[:] = fx
     fft_object() # the result is stored in b
-    fk = 0.5 * np.abs(b * const)**2
     del fx
+    fk = 0.5 * np.abs(b * const)**2
 
     a[:] = fy
     fft_object()
-    fk += 0.5 * np.abs(b * const)**2
     del fy
+    fk += 0.5 * np.abs(b * const)**2
 
     a[:] = fz
     fft_object()
-    fk += 0.5 * np.abs(b * const)**2
     del fz
+    fk += 0.5 * np.abs(b * const)**2
 
     return fk
 
@@ -172,6 +155,7 @@ def pair_power(Pk, Lbox, Nbox, shift=np.array([0, 0, 0])):
         kz = kz - shift[2]
     #
     k = np.sqrt(kx*kx + ky*ky + kz*kz)
+    del kx, ky, kz
     # Construct a (n,2) shape array
     k = np.ravel(k)
     Pk = np.ravel(Pk)
@@ -198,7 +182,8 @@ def hist_sample(Pk_pair, kmin, kmax, spacing):
 
 # -----------------------------------MAIN---------------------------------------
 
-@profile
+# @profile # this slow down the program tremendously, remember to comment it out
+# except when profiling.
 def main():
     comm = MPI.COMM_WORLD
     rank = comm.Get_rank() # thread number
@@ -246,12 +231,16 @@ def main():
         print(f'[{datetime.datetime.now()}] Planner: {n_loops} loops, {m} fold, {Nbox} size each thread.', flush=True)
         print('Accept plan? (y/n)', flush=True)
         if input() != 'y':
-            print('Plan rejected. Press any key to exit.', flush=True)
+            print('Plan rejected. Press any key to exit.', flush=True) if rank == 0 else None
             sys.exit(0)
         print('Plan confirmed. Starting computation.', flush=True)
+    comm.Barrier() # synchronize all threads before starting the computation
+
     # print(f'Rank: {rank}, r: {r}, s: {s}, t: {t}, Nbox per box: {Nbox}')
 
-    pbar = tqdm.tqdm(total=100 * n_loops, ncols=50, bar_format='{l_bar}{bar}| [{elapsed}<{remaining}]') if rank == 0 else None
+    # ------------------------------PROGRESS BAR--------------------------------
+
+    pbar = tqdm.tqdm(total=100 * n_loops, ncols=100, bar_format='{l_bar}{bar}| [{elapsed}<{remaining}]') if rank == 0 else None
 
     # --------------------------------LOAD DATA---------------------------------
     print(f'[{datetime.datetime.now()}] Load snapshot: {SNAPSHOT}')
@@ -283,7 +272,7 @@ def main():
     indexfile = os.path.join(SAVEDIR, 'index.ann')
     if os.path.isfile(indexfile):
         ann_idx = AnnoyIndex(3, 'euclidean')
-        ann_idx.load(indexfile)
+        ann_idx.load(indexfile) # prefault: load index to memory, could this resolve the speed issue?
         print(f'[{datetime.datetime.now()}] Index loaded')
     else:
         ann_idx = AnnoyIndex(3, 'euclidean')  # Length of item vector that will be indexed
@@ -375,7 +364,6 @@ def main():
 
                 
                 del a_queue, x_queue, y_queue, z_queue # free memory
-                gc.collect() # garbage collection
 
                 # f is constructed last index fastest, so C order can reconstruct to the 
                 # correct cube. C order is the default value of reshape btw.
@@ -395,7 +383,7 @@ def main():
 
                 # Sampling k in concentric spheres
                 Pk = pair_power(P, Lbox, Nbox, shift=-2*np.pi*np.array([bx+nb1, by+nb2, bz+nb3])/LTOT)
-                print(f'[{datetime.datetime.now()}] Pk: {Pk.shape}')
+                # print(f'[{datetime.datetime.now()}] Pk: {Pk.shape}')
                 del P
 
                 # Sample power spectrum P(k), from the fundamental mode to the Nyquist frequency (half frequency of the smallest scale)

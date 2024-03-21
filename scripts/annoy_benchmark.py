@@ -5,7 +5,7 @@ import numpy as np
 from annoy import AnnoyIndex
 
 # ------------------------------------CONFIG------------------------------------
-Nsize = 1000
+Nsize = 250
 # -------------------------------------MAIN-------------------------------------
 
 SNAPSHOT = '/appalachia/d5/DISK/from_pleiades/snapshots/gmcs0_wind0_gmc9/snapshot_550.hdf5'
