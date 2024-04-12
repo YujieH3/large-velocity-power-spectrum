@@ -53,7 +53,7 @@ MAXNBOX = 500 # maximum box size allowed by memory
 
 LTOT = 1 # kpc
 
-NBUFFER = 10000 # number of points to query before synchronize.
+NBUFFER = 5000 # number of points to query before synchronize.
 SAVEDIR = '../output/'
 
 remove_bulk_velocity = True
@@ -294,147 +294,143 @@ def main():
     # So it's a factorization problem of NTOT/m.
     
     bidx = 0
-    for nb1 in range(n):
-        for nb2 in range(n):
-            for nb3 in range(n):
-                qidx = 0
-                f_idx = 0 # index track the index of the first empty element in f array
-                a_queue = np.empty((n_loops, n_queue, 3), dtype=np.float32)
-                x_queue = np.empty((n_loops, n_queue), dtype=np.float32)
-                y_queue = np.empty((n_loops, n_queue), dtype=np.float32)
-                z_queue = np.empty((n_loops, n_queue), dtype=np.float32)
-                f = np.empty((Nbox**3, 3), dtype=np.complex64) # folded field with phase.
-                for i in range(Nbox):
-                    for j in range(Nbox):
-                        for k in range(Nbox):
-                            iidx = 0
-                            for n1 in range(n): 
-                                for n2 in range(n):
-                                    for n3 in range(n): # the art of for loops
-                                        # One tradeoff: more points queried at once, less communication,
-                                        # less time needed, but more memory usage. Make it a tunable parameter.
-                                        x = ((r+n1) * Nbox + i) * LCELL
-                                        y = ((s+n2) * Nbox + j) * LCELL
-                                        z = ((t+n3) * Nbox + k) * LCELL
-                                        query = np.array([x, y, z], dtype=np.float32) # specific location to query, dependent on rank
+    for nb1, nb2, nb3 in np.ndindex(n,n,n):
+        qidx = 0
+        f_idx = 0 # index track the index of the first empty element in f array
+        a_queue = np.empty((n_loops, n_queue, 3), dtype=np.float32)
+        x_queue = np.empty((n_loops, n_queue), dtype=np.float32)
+        y_queue = np.empty((n_loops, n_queue), dtype=np.float32)
+        z_queue = np.empty((n_loops, n_queue), dtype=np.float32)
+        f = np.empty((Nbox**3, 3), dtype=np.complex64) # folded field with phase.
+        for i in range(Nbox):
+            for j in range(Nbox):
+                for k in range(Nbox):
+                    iidx = 0
+                    for n1, n2, n3 in np.ndindex(n, n, n):
+                        # One tradeoff: more points queried at once, less communication,
+                        # less time needed, but more memory usage. Make it a tunable parameter.
+                        x = ((r+n1) * Nbox + i) * LCELL
+                        y = ((s+n2) * Nbox + j) * LCELL
+                        z = ((t+n3) * Nbox + k) * LCELL
+                        query = np.array([x, y, z], dtype=np.float32) # specific location to query, dependent on rank
 
-                                        nb = ann_idx.get_nns_by_vector(query, n=1, search_k=-1, # type: ignore
-                                                                    include_distances=False) 
-                                        # print(nb) # of shape (1,) because we query only the 1 nearest neighbor, and doesn't include distance
-                                        a = velocity[nb[0]] # type: ignore # extract the velocity of corresponding index
-                                        
-                                        a_queue[iidx, qidx] = a
-                                        x_queue[iidx, qidx] = x
-                                        y_queue[iidx, qidx] = y
-                                        z_queue[iidx, qidx] = z
+                        nb = ann_idx.get_nns_by_vector(query, n=1, search_k=-1, # type: ignore
+                                                    include_distances=False) 
+                        # print(nb) # of shape (1,) because we query only the 1 nearest neighbor, and doesn't include distance
+                        a = velocity[nb[0]] # type: ignore # extract the velocity of corresponding index
+                        
+                        a_queue[iidx, qidx] = a
+                        x_queue[iidx, qidx] = x
+                        y_queue[iidx, qidx] = y
+                        z_queue[iidx, qidx] = z
 
-                                        iidx += 1
-                            qidx += 1
+                        iidx += 1
+                    qidx += 1
 
-                            if qidx >= n_queue or qidx + f_idx >= Nbox**3:
-                                qidx = 0 # reset the queue index
-                                # synchronize and gather the queue to memory of each core
-                                a_arr = np.array(comm.allgather(a_queue), dtype=np.float32) # a_arr of shape [NTHREADS, n_loops, NBUFFER, 3] all_gather add an axis in the front
-                                x_arr = np.array(comm.allgather(x_queue), dtype=np.float32)# or generate x_arr each cpu.
-                                y_arr = np.array(comm.allgather(y_queue), dtype=np.float32)# depends on which is faster.
-                                z_arr = np.array(comm.allgather(z_queue), dtype=np.float32)
-                                
-                                a_arr = a_arr.reshape(NTHREADS*n_loops, n_queue, 3) # last variable changing fastest.
-                                x_arr = x_arr.reshape(NTHREADS*n_loops, n_queue) 
-                                y_arr = y_arr.reshape(NTHREADS*n_loops, n_queue) # Tested to work
-                                z_arr = z_arr.reshape(NTHREADS*n_loops, n_queue)
+                    if qidx >= n_queue or qidx + f_idx >= Nbox**3:
+                        qidx = 0 # reset the queue index
+                        # synchronize and gather the queue to memory of each core
+                        a_arr = np.array(comm.allgather(a_queue), dtype=np.float32) # a_arr of shape [NTHREADS, n_loops, NBUFFER, 3] all_gather add an axis in the front
+                        x_arr = np.array(comm.allgather(x_queue), dtype=np.float32)# or generate x_arr each cpu.
+                        y_arr = np.array(comm.allgather(y_queue), dtype=np.float32)# depends on which is faster.
+                        z_arr = np.array(comm.allgather(z_queue), dtype=np.float32)
+                        
+                        a_arr = a_arr.reshape(NTHREADS*n_loops, n_queue, 3) # last variable changing fastest.
+                        x_arr = x_arr.reshape(NTHREADS*n_loops, n_queue) 
+                        y_arr = y_arr.reshape(NTHREADS*n_loops, n_queue) # Tested to work
+                        z_arr = z_arr.reshape(NTHREADS*n_loops, n_queue)
 
-                                # This phase application is infact an FFT of some sort.
-                                # TODO use fft here to speed things up
-                                phase = np.exp(
-                                    -1j * (2 * np.pi / LTOT) * ((bx+nb1) * x_arr + (by+nb2) * y_arr + (bz+nb3) * z_arr)    # x, y, z / L or nx, ny, nz / N
-                                ) # phase of shape [NTHREADS, NBUFFER]
+                        # This phase application is infact an FFT of some sort.
+                        # TODO use fft here to speed things up
+                        phase = np.exp(
+                            -1j * (2 * np.pi / LTOT) * ((bx+nb1) * x_arr + (by+nb2) * y_arr + (bz+nb3) * z_arr)    # x, y, z / L or nx, ny, nz / N
+                        ) # phase of shape [NTHREADS, NBUFFER]
 
-                                if f_idx + n_queue < Nbox**3:
-                                    f[f_idx:f_idx+n_queue, :] = np.sum(a_arr * phase[...,None], axis=0) / m**1.5 # shape (NBUFFER, 3)
-                                    f_idx += n_queue # update the index of the first empty element in f array
-                                    pbar.update(n_queue / (Nbox**3) * 80) if rank == 0 else None # type: ignore
-                                else:
-                                    temp_idx = Nbox**3 - f_idx
-                                    f[f_idx:, :] = np.sum(a_arr[:,:temp_idx,:] * phase[:,:temp_idx,None], axis=0) / m**1.5 # indices after leftover are from the precious loop
-                                    f_idx = Nbox**3 # update to the end of the array. f_idx will not be used anymore
-                                    pbar.update(temp_idx / (Nbox**3) * 80) if rank == 0 else None # type: ignore
-                            else:
-                                continue
+                        if f_idx + n_queue < Nbox**3:
+                            f[f_idx:f_idx+n_queue, :] = np.sum(a_arr * phase[...,None], axis=0) / m**1.5 # shape (NBUFFER, 3)
+                            f_idx += n_queue # update the index of the first empty element in f array
+                            pbar.update(n_queue / (Nbox**3) * 80) if rank == 0 else None # type: ignore
+                        else:
+                            temp_idx = Nbox**3 - f_idx
+                            f[f_idx:, :] = np.sum(a_arr[:,:temp_idx,:] * phase[:,:temp_idx,None], axis=0) / m**1.5 # indices after leftover are from the precious loop
+                            f_idx = Nbox**3 # update to the end of the array. f_idx will not be used anymore
+                            pbar.update(temp_idx / (Nbox**3) * 80) if rank == 0 else None # type: ignore
+                    else:
+                        continue
 
-                
-                del a_queue, x_queue, y_queue, z_queue # free memory
+        
+        del a_queue, x_queue, y_queue, z_queue # free memory
 
-                # f is constructed last index fastest, so C order can reconstruct to the 
-                # correct cube. C order is the default value of reshape btw.
-                f = np.reshape(f, (Nbox, Nbox, Nbox, 3), order='C') # reshape for FFT.
+        # f is constructed last index fastest, so C order can reconstruct to the 
+        # correct cube. C order is the default value of reshape btw.
+        f = np.reshape(f, (Nbox, Nbox, Nbox, 3), order='C') # reshape for FFT.
 
-                # ----------------------------FFT-------------------------------
-                print(f'[{datetime.datetime.now()}] FFTW: {f.shape}')
+        # ----------------------------FFT-------------------------------
+        print(f'[{datetime.datetime.now()}] FFTW: {f.shape}')
 
-                # TODO save plan if doesn't exist, read if it exists
-                P = FFTW_vector_power(f[:,:,:,0], f[:,:,:,1], f[:,:,:,2], Lbox, Nbox)
+        # TODO save plan if doesn't exist, read if it exists
+        P = FFTW_vector_power(f[:,:,:,0], f[:,:,:,1], f[:,:,:,2], Lbox, Nbox)
 
-                print(f'[{datetime.datetime.now()}] FFTW finished: {P.shape}')
+        print(f'[{datetime.datetime.now()}] FFTW finished: {P.shape}')
 
-                pbar.update(10) if rank == 0 else None # update progress bar # type: ignore
-                
-                # ---------------------------SAMPLE-----------------------------
+        pbar.update(10) if rank == 0 else None # update progress bar # type: ignore
+        
+        # ---------------------------SAMPLE-----------------------------
 
-                # Sampling k in concentric spheres
-                Pk = pair_power(P, Lbox, Nbox, shift=-2*np.pi*np.array([bx+nb1, by+nb2, bz+nb3])/LTOT)
-                # print(f'[{datetime.datetime.now()}] Pk: {Pk.shape}')
-                del P
+        # Sampling k in concentric spheres
+        Pk = pair_power(P, Lbox, Nbox, shift=-2*np.pi*np.array([bx+nb1, by+nb2, bz+nb3])/LTOT)
+        # print(f'[{datetime.datetime.now()}] Pk: {Pk.shape}')
+        del P
 
-                # Sample power spectrum P(k), from the fundamental mode to the Nyquist frequency (half frequency of the smallest scale)
-                Pkk = hist_sample(Pk, kmin=2*np.pi/LTOT, kmax=np.pi/LCELL, spacing=2*np.pi/LTOT) # Pkk = (k, P, Psum, Nsample) of shape (NTOT, 4)
-                del Pk
-                
-                # Use energy spectral density of dimension ~velocity^2/k
-                Pkk[:, 1] *= 4 * np.pi * Pkk[:, 0] ** 2 
-                
-                Pkk = np.array(Pkk, dtype=np.float32) # use float32
-                p_sum = Pkk[:, 2].copy()
-                n_sample = Pkk[:, 3].copy()    
+        # Sample power spectrum P(k), from the fundamental mode to the Nyquist frequency (half frequency of the smallest scale)
+        Pkk = hist_sample(Pk, kmin=2*np.pi/LTOT, kmax=np.pi/LCELL, spacing=2*np.pi/LTOT) # Pkk = (k, P, Psum, Nsample) of shape (NTOT, 4)
+        del Pk
+        
+        # Use energy spectral density of dimension ~velocity^2/k
+        Pkk[:, 1] *= 4 * np.pi * Pkk[:, 0] ** 2 
+        
+        Pkk = np.array(Pkk, dtype=np.float32) # use float32
+        p_sum = Pkk[:, 2].copy()
+        n_sample = Pkk[:, 3].copy()    
 
-                # print(f'[{datetime.datetime.now()}] Pkk: {Pkk.shape}')
+        # print(f'[{datetime.datetime.now()}] Pkk: {Pkk.shape}')
 
-                # ---------------------------COMBINE----------------------------
-                if rank == 0: # allocate memory for the total sum. It couldn't work on Pkk[:, 2] directly
-                    n_pk = len(Pkk)
-                    p_sum_tot = np.empty(n_pk, dtype=np.float32)
-                    n_sample_tot = np.empty(n_pk, dtype=np.float32)
-                else:
-                    p_sum_tot = None
-                    n_sample_tot = None
+        # ---------------------------COMBINE----------------------------
+        if rank == 0: # allocate memory for the total sum. It couldn't work on Pkk[:, 2] directly
+            n_pk = len(Pkk)
+            p_sum_tot = np.empty(n_pk, dtype=np.float32)
+            n_sample_tot = np.empty(n_pk, dtype=np.float32)
+        else:
+            p_sum_tot = None
+            n_sample_tot = None
 
-                comm.Reduce(sendbuf=p_sum, recvbuf=p_sum_tot, op=MPI.SUM, root=0) # sum up all power spectra to rank 0
-                comm.Reduce(sendbuf=n_sample, recvbuf=n_sample_tot, op=MPI.SUM, root=0)
-                
-                if rank == 0:
-                    Pkk[:, 2] = p_sum_tot
-                    Pkk[:, 3] = n_sample_tot
-                    Pkk[:, 1] = Pkk[:, 2] / Pkk[:, 3] * (4 * np.pi * Pkk[:, 0] ** 2)
-                    # print(f'[{datetime.datetime.now()}] Pkk: {Pkk.shape}')
-                
-                # ----------------------------SAVE------------------------------
-                
-                if rank == 0 and bidx == 0:
-                    np.savetxt(outputfile, Pkk) # save however you want. Let's make a simple text file for now.
-                    print(f'[{datetime.datetime.now()}] Saved: {outputfile}')
-                elif rank == 0 and bidx > 0:
-                    Pkk_tot = np.loadtxt(outputfile)
-                    Pkk_tot[:, 2] += Pkk[:, 2]
-                    Pkk_tot[:, 3] += Pkk[:, 3]
-                    Pkk_tot[:, 1] = Pkk_tot[:, 2] / Pkk_tot[:, 3] * (4 * np.pi * Pkk_tot[:, 0] ** 2)
-                    np.savetxt(outputfile, Pkk_tot)
-                    print(f'[{datetime.datetime.now()}] Combined and saved: {Pkk.shape}')
+        comm.Reduce(sendbuf=p_sum, recvbuf=p_sum_tot, op=MPI.SUM, root=0) # sum up all power spectra to rank 0
+        comm.Reduce(sendbuf=n_sample, recvbuf=n_sample_tot, op=MPI.SUM, root=0)
+        
+        if rank == 0:
+            Pkk[:, 2] = p_sum_tot
+            Pkk[:, 3] = n_sample_tot
+            Pkk[:, 1] = Pkk[:, 2] / Pkk[:, 3] * (4 * np.pi * Pkk[:, 0] ** 2)
+            # print(f'[{datetime.datetime.now()}] Pkk: {Pkk.shape}')
+        
+        # ----------------------------SAVE------------------------------
+        
+        if rank == 0 and bidx == 0:
+            np.savetxt(outputfile, Pkk) # save however you want. Let's make a simple text file for now.
+            print(f'[{datetime.datetime.now()}] Saved: {outputfile}')
+        elif rank == 0 and bidx > 0:
+            Pkk_tot = np.loadtxt(outputfile)
+            Pkk_tot[:, 2] += Pkk[:, 2]
+            Pkk_tot[:, 3] += Pkk[:, 3]
+            Pkk_tot[:, 1] = Pkk_tot[:, 2] / Pkk_tot[:, 3] * (4 * np.pi * Pkk_tot[:, 0] ** 2)
+            np.savetxt(outputfile, Pkk_tot)
+            print(f'[{datetime.datetime.now()}] Combined and saved: {Pkk.shape}')
 
-                pbar.update(5) if rank == 0 else None # update progress bar # type: ignore
+        pbar.update(5) if rank == 0 else None # update progress bar # type: ignore
 
-                bidx += 1 # beta index for the big loop
+        bidx += 1 # beta index for the big loop
 
-                gc.collect() # garbage collection
+        gc.collect() # garbage collection
 
     pbar.close() if rank == 0 else None # type: ignore
 
