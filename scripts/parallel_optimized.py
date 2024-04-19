@@ -14,36 +14,12 @@ import sys # debug
 import os
 import datetime # benchmarking
 import gc # garbage collection
-from memory_profiler import profile
+#from memory_profiler import profile
+import warnings
 
 # TODO numba acceleration of the loop? No the loop is not the bottleneck. Possibly the synchronize
 # SOLVED the fftw threading bug? Turns out to be a conda package issue.
 # DONE use fft_object instead of pyfftw.interfaces.numpy_fft.fftn
-
-"""
-From pyFFTW documentation:
---------------------------------------------------------------------------------
-The first call for a given transform size and shape and dtype and so on may be 
-slow, this is down to FFTW needing to plan the transform for the first time. 
-Once this has been done, subsequent equivalent transforms during the same 
-session are much faster. It's possible to export and save the internal knowledge 
-(the wisdom) about how the transform is done. This is described below.
-
-Even after the first transform of a given specification has been performed, 
-subsequent transforms are never as fast as using pyfftw.FFTW objects directly, 
-and in many cases are substantially slower. This is because of the internal 
-overhead of creating a new pyfftw.FFTW object on every call. For this reason, 
-a cache is provided, which is recommended to be used whenever pyfftw.interfaces 
-is used. Turn the cache on using pyfftw.interfaces.cache.enable(). This function 
-turns the cache on globally. Note that using the cache invokes the threading     # threading module, maybe it's this?
-module.
-
-The cache temporarily stores a copy of any interim pyfftw.FFTW objects that are 
-created. If they are not used for some period of time, which can be set with 
-pyfftw.interfaces.cache.set_keepalive_time(), then they are removed from the 
-cache (liberating any associated memory). The default keepalive time is 0.1 
-seconds.
-"""
 
 # ------------------------------------CONFIG------------------------------------
 SNAPSHOT = '/appalachia/d5/DISK/from_pleiades/snapshots/gmcs0_wind0_gmc9/snapshot_550.hdf5'
@@ -69,6 +45,7 @@ parser.add_argument('-N', '--ntot', nargs='?',type=int, default=NTOT, help='Tota
 parser.add_argument('-M', '--maxnbox', nargs='?',type=int, default=MAXNBOX, help='Maximum box size allowed by memory. A planner will decide the optimal box size.')
 parser.add_argument('-l', '--ltot', nargs='?',type=int, default=LTOT, help='Total length of the box.')
 parser.add_argument('-b', '--nbuffer', nargs='?',type=int, default=NBUFFER, help='Number of points to query before synchronize.')
+parser.add_argument('-f', action='store_true', help='Skip confirmation and start the computation.')
 args = parser.parse_args()
 
 SNAPSHOT = args.input
@@ -77,6 +54,7 @@ NTOT     = args.ntot
 MAXNBOX  = args.maxnbox
 LTOT     = args.ltot
 NBUFFER  = args.nbuffer
+FORCE    = args.f
 
 # -----------------------------------FUNCTIONS----------------------------------
 
@@ -134,6 +112,29 @@ def FFTW_vector_power(fx, fy, fz, Lbox, Nsize):
     return fk
 
 
+
+def FFTW_power(f, Lbox, Nsize):
+    """
+    Same with vector_power, but using the fft_object to allow full power of 
+    FFTW.
+    """
+    # Fourier transform
+    const = (Lbox / (2 * np.pi)) ** 1.5 / Nsize ** 3
+
+    a = pyfftw.empty_aligned((Nsize, Nsize, Nsize), dtype='complex64')
+    b = pyfftw.empty_aligned((Nsize, Nsize, Nsize), dtype='complex64')
+    fft_object = pyfftw.FFTW(a, b, axes=(0,1,2)) # input is a, output is b 
+    # maybe initialize f as an empty aligned array?
+    
+    a[:] = f
+    fft_object() # the result is stored in b
+    del f
+    fk = 0.5 * np.abs(b * const)**2
+
+    return fk
+
+
+
 def pair_power(Pk, Lbox, Nbox, shift=np.array([0, 0, 0])):
     """
   Create pairs of power and k. Sampling in concentric spherical
@@ -172,7 +173,9 @@ def hist_sample(Pk_pair, kmin, kmax, spacing):
     bin_edges = np.linspace(kmin - spacing / 2, kmax + spacing / 2, n_bins + 1)
     Psum, _ = np.histogram(Pk_pair[:, 0], bins=bin_edges, weights=Pk_pair[:, 1])
     Nsample, _ = np.histogram(Pk_pair[:, 0], bins=bin_edges)
-    P = Psum / Nsample # might raise warning of division by zero
+    with warnings.catch_warnings():
+        warnings.filterwarnings("ignore", message="invalid value encountered in divide")
+        P = Psum / Nsample # might raise warning of division by zero
     # But P is always set by Psum/Nsample and won't be used anywhere so we don't care
 
     Pvk = np.column_stack((bin_centers, P, Psum, Nsample))
@@ -229,11 +232,20 @@ def main():
 
     if rank == 0:
         print(f'[{datetime.datetime.now()}] Planner: {n_loops} loops, {m} fold, {Nbox} size each thread.', flush=True)
-        print('Accept plan? (y/n)', flush=True)
-        if input() != 'y':
-            print('Plan rejected. Press any key to exit.', flush=True) if rank == 0 else None
-            sys.exit(0)
+        if not FORCE:
+            print('Accept plan? (y/n)', flush=True)
+            if input() != 'y':
+                print('Plan rejected. Press any key to exit.', flush=True) if rank == 0 else None
+                sys.exit(0)
         print('Plan confirmed. Starting computation.', flush=True)
+
+        # Print the set of key parameters used.
+        print(f'Snapshot: {SNAPSHOT}', flush=True)
+        print(f'Output file: {outputfile}', flush=True)
+        print(f'NTOT: {NTOT}', flush=True)
+        print(f'MAXNBOX: {MAXNBOX}', flush=True)
+        print(f'LTOT: {LTOT}', flush=True)
+        print(f'NBUFFER: {NBUFFER}', flush=True)
     comm.Barrier() # synchronize all threads before starting the computation
 
     # print(f'Rank: {rank}, r: {r}, s: {s}, t: {t}, Nbox per box: {Nbox}')
@@ -285,7 +297,6 @@ def main():
         print(f'[{datetime.datetime.now()}] Index built')
     pbar.update(5) if rank == 0 else None # type:ignore
 
-    # sys.exit(0)
     # --------------------------------QUERY-------------------------------------
     # TODO a big loop to interpolate-FFT-combine-save and again for a new box
     # to save memory, spread task over time. Something like Nmaxbox, the biggest
@@ -295,68 +306,74 @@ def main():
     
     bidx = 0
     for nb1, nb2, nb3 in np.ndindex(n,n,n):
-        qidx = 0
+        qidx = 0 # index track the filling of queue
         f_idx = 0 # index track the index of the first empty element in f array
+        
+        # The quantity of power spectrum. For now we do only velocity
         a_queue = np.empty((n_loops, n_queue, 3), dtype=np.float32)
-        x_queue = np.empty((n_loops, n_queue), dtype=np.float32)
+
+        # x,y,z queue will be contracted into phase every n_queue points. The memory cost is minor.
+        x_queue = np.empty((n_loops, n_queue), dtype=np.float32) 
         y_queue = np.empty((n_loops, n_queue), dtype=np.float32)
         z_queue = np.empty((n_loops, n_queue), dtype=np.float32)
-        f = np.empty((Nbox**3, 3), dtype=np.complex64) # folded field with phase.
-        for i in range(Nbox):
-            for j in range(Nbox):
-                for k in range(Nbox):
-                    iidx = 0
-                    for n1, n2, n3 in np.ndindex(n, n, n):
-                        # One tradeoff: more points queried at once, less communication,
-                        # less time needed, but more memory usage. Make it a tunable parameter.
-                        x = ((r+n1) * Nbox + i) * LCELL
-                        y = ((s+n2) * Nbox + j) * LCELL
-                        z = ((t+n3) * Nbox + k) * LCELL
-                        query = np.array([x, y, z], dtype=np.float32) # specific location to query, dependent on rank
 
-                        nb = ann_idx.get_nns_by_vector(query, n=1, search_k=-1, # type: ignore
-                                                    include_distances=False) 
-                        # print(nb) # of shape (1,) because we query only the 1 nearest neighbor, and doesn't include distance
-                        a = velocity[nb[0]] # type: ignore # extract the velocity of corresponding index
-                        
-                        a_queue[iidx, qidx] = a
-                        x_queue[iidx, qidx] = x
-                        y_queue[iidx, qidx] = y
-                        z_queue[iidx, qidx] = z
+        # folded field with phase.
+        f = np.empty((Nbox**3, 3), dtype=np.complex64) 
+        for i, j, k in np.ndindex(n, n, n):
 
-                        iidx += 1
-                    qidx += 1
+            iidx = 0
 
-                    if qidx >= n_queue or qidx + f_idx >= Nbox**3:
-                        qidx = 0 # reset the queue index
-                        # synchronize and gather the queue to memory of each core
-                        a_arr = np.array(comm.allgather(a_queue), dtype=np.float32) # a_arr of shape [NTHREADS, n_loops, NBUFFER, 3] all_gather add an axis in the front
-                        x_arr = np.array(comm.allgather(x_queue), dtype=np.float32)# or generate x_arr each cpu.
-                        y_arr = np.array(comm.allgather(y_queue), dtype=np.float32)# depends on which is faster.
-                        z_arr = np.array(comm.allgather(z_queue), dtype=np.float32)
-                        
-                        a_arr = a_arr.reshape(NTHREADS*n_loops, n_queue, 3) # last variable changing fastest.
-                        x_arr = x_arr.reshape(NTHREADS*n_loops, n_queue) 
-                        y_arr = y_arr.reshape(NTHREADS*n_loops, n_queue) # Tested to work
-                        z_arr = z_arr.reshape(NTHREADS*n_loops, n_queue)
+            for n1, n2, n3 in np.ndindex(n, n, n):
 
-                        # This phase application is infact an FFT of some sort.
-                        # TODO use fft here to speed things up
-                        phase = np.exp(
-                            -1j * (2 * np.pi / LTOT) * ((bx+nb1) * x_arr + (by+nb2) * y_arr + (bz+nb3) * z_arr)    # x, y, z / L or nx, ny, nz / N
-                        ) # phase of shape [NTHREADS, NBUFFER]
+                x = ((r+n1) * Nbox + i) * LCELL
+                y = ((s+n2) * Nbox + j) * LCELL
+                z = ((t+n3) * Nbox + k) * LCELL
+                query = np.array([x, y, z], dtype=np.float32) # specific location to query, dependent on rank
 
-                        if f_idx + n_queue < Nbox**3:
-                            f[f_idx:f_idx+n_queue, :] = np.sum(a_arr * phase[...,None], axis=0) / m**1.5 # shape (NBUFFER, 3)
-                            f_idx += n_queue # update the index of the first empty element in f array
-                            pbar.update(n_queue / (Nbox**3) * 80) if rank == 0 else None # type: ignore
-                        else:
-                            temp_idx = Nbox**3 - f_idx
-                            f[f_idx:, :] = np.sum(a_arr[:,:temp_idx,:] * phase[:,:temp_idx,None], axis=0) / m**1.5 # indices after leftover are from the precious loop
-                            f_idx = Nbox**3 # update to the end of the array. f_idx will not be used anymore
-                            pbar.update(temp_idx / (Nbox**3) * 80) if rank == 0 else None # type: ignore
-                    else:
-                        continue
+                nb = ann_idx.get_nns_by_vector(query, n=1, search_k=-1, # type: ignore
+                                            include_distances=False) 
+                # print(nb) # of shape (1,) because we query only the 1 nearest neighbor, and doesn't include distance
+                a = velocity[nb[0]] # type: ignore # extract the velocity of corresponding index
+                
+                a_queue[iidx, qidx] = a
+                x_queue[iidx, qidx] = x
+                y_queue[iidx, qidx] = y
+                z_queue[iidx, qidx] = z
+
+                iidx += 1
+
+            qidx += 1
+
+            if qidx >= n_queue or qidx + f_idx >= Nbox**3:
+                qidx = 0 # reset the queue index
+                # synchronize and gather the queue to memory of each core
+                a_arr = np.array(comm.allgather(a_queue), dtype=np.float32) # a_arr of shape [NTHREADS, n_loops, NBUFFER, 3] all_gather add an axis in the front
+                x_arr = np.array(comm.allgather(x_queue), dtype=np.float32)# or generate x_arr each cpu.
+                y_arr = np.array(comm.allgather(y_queue), dtype=np.float32)# depends on which is faster.
+                z_arr = np.array(comm.allgather(z_queue), dtype=np.float32)
+                
+                a_arr = a_arr.reshape(NTHREADS*n_loops, n_queue, 3) # last variable changing fastest.
+                x_arr = x_arr.reshape(NTHREADS*n_loops, n_queue) 
+                y_arr = y_arr.reshape(NTHREADS*n_loops, n_queue) # Tested to work
+                z_arr = z_arr.reshape(NTHREADS*n_loops, n_queue)
+
+                # This phase application is infact an FFT of some sort.
+                # TODO use fft here to speed things up
+                phase = np.exp(
+                    -1j * (2 * np.pi / LTOT) * ((bx+nb1) * x_arr + (by+nb2) * y_arr + (bz+nb3) * z_arr)    # x, y, z / L or nx, ny, nz / N
+                ) # phase of shape [NTHREADS, NBUFFER]
+
+                if f_idx + n_queue < Nbox**3:
+                    f[f_idx:f_idx+n_queue, :] = np.sum(a_arr * phase[...,None], axis=0) / m**1.5 # shape (NBUFFER, 3)
+                    f_idx += n_queue # update the index of the first empty element in f array
+                    pbar.update(n_queue / (Nbox**3) * 80) if rank == 0 else None # type: ignore
+                else:
+                    temp_idx = Nbox**3 - f_idx
+                    f[f_idx:, :] = np.sum(a_arr[:,:temp_idx,:] * phase[:,:temp_idx,None], axis=0) / m**1.5 # indices after leftover are from the precious loop
+                    f_idx = Nbox**3 # update to the end of the array. f_idx will not be used anymore
+                    pbar.update(temp_idx / (Nbox**3) * 80) if rank == 0 else None # type: ignore
+            else:
+                continue
 
         
         del a_queue, x_queue, y_queue, z_queue # free memory
@@ -366,12 +383,23 @@ def main():
         f = np.reshape(f, (Nbox, Nbox, Nbox, 3), order='C') # reshape for FFT.
 
         # ----------------------------FFT-------------------------------
-        print(f'[{datetime.datetime.now()}] FFTW: {f.shape}')
+        #print(f'[{datetime.datetime.now()}] FFTW: {f.shape}')
+
+        # Try to keep max memory usage to 4 Nbox**3 arrays.
+        fx = f[:,:,:,0]
+        fy = f[:,:,:,1]
+        fz = f[:,:,:,2]
+        del f
 
         # TODO save plan if doesn't exist, read if it exists
-        P = FFTW_vector_power(f[:,:,:,0], f[:,:,:,1], f[:,:,:,2], Lbox, Nbox)
+        P = FFTW_power(fx, Lbox, Nbox)
+        del fx
+        P += FFTW_power(fy, Lbox, Nbox)
+        del fy
+        P += FFTW_power(fz, Lbox, Nbox)
+        del fz
 
-        print(f'[{datetime.datetime.now()}] FFTW finished: {P.shape}')
+        #print(f'[{datetime.datetime.now()}] FFTW finished: {P.shape}')
 
         pbar.update(10) if rank == 0 else None # update progress bar # type: ignore
         
@@ -410,21 +438,27 @@ def main():
         if rank == 0:
             Pkk[:, 2] = p_sum_tot
             Pkk[:, 3] = n_sample_tot
-            Pkk[:, 1] = Pkk[:, 2] / Pkk[:, 3] * (4 * np.pi * Pkk[:, 0] ** 2)
+            with warnings.catch_warnings():
+                warnings.filterwarnings("ignore", message="invalid value encountered in divide")
+                Pkk[:, 1] = Pkk[:, 2] / Pkk[:, 3] * (4 * np.pi * Pkk[:, 0] ** 2)
             # print(f'[{datetime.datetime.now()}] Pkk: {Pkk.shape}')
         
         # ----------------------------SAVE------------------------------
         
         if rank == 0 and bidx == 0:
             np.savetxt(outputfile, Pkk) # save however you want. Let's make a simple text file for now.
-            print(f'[{datetime.datetime.now()}] Saved: {outputfile}')
+            #print(f'[{datetime.datetime.now()}] Saved: {outputfile}')
         elif rank == 0 and bidx > 0:
             Pkk_tot = np.loadtxt(outputfile)
             Pkk_tot[:, 2] += Pkk[:, 2]
             Pkk_tot[:, 3] += Pkk[:, 3]
-            Pkk_tot[:, 1] = Pkk_tot[:, 2] / Pkk_tot[:, 3] * (4 * np.pi * Pkk_tot[:, 0] ** 2)
+
+            # Pk will be overwrite every save, all nans will be removed in the end. No need to flag warnings
+            with warnings.catch_warnings():
+                warnings.filterwarnings("ignore", message="invalid value encountered in divide")
+                Pkk_tot[:, 1] = Pkk_tot[:, 2] / Pkk_tot[:, 3] * (4 * np.pi * Pkk_tot[:, 0] ** 2)
             np.savetxt(outputfile, Pkk_tot)
-            print(f'[{datetime.datetime.now()}] Combined and saved: {Pkk.shape}')
+            #print(f'[{datetime.datetime.now()}] Combined and saved: {Pkk.shape}')
 
         pbar.update(5) if rank == 0 else None # update progress bar # type: ignore
 
@@ -435,7 +469,32 @@ def main():
     pbar.close() if rank == 0 else None # type: ignore
 
 if __name__ == '__main__':
-    main()
+    assert main() == 0, 'Program stopped before completion.'
 
 
 
+
+"""
+From pyFFTW documentation:
+--------------------------------------------------------------------------------
+The first call for a given transform size and shape and dtype and so on may be 
+slow, this is down to FFTW needing to plan the transform for the first time. 
+Once this has been done, subsequent equivalent transforms during the same 
+session are much faster. It's possible to export and save the internal knowledge 
+(the wisdom) about how the transform is done. This is described below.
+
+Even after the first transform of a given specification has been performed, 
+subsequent transforms are never as fast as using pyfftw.FFTW objects directly, 
+and in many cases are substantially slower. This is because of the internal 
+overhead of creating a new pyfftw.FFTW object on every call. For this reason, 
+a cache is provided, which is recommended to be used whenever pyfftw.interfaces 
+is used. Turn the cache on using pyfftw.interfaces.cache.enable(). This function 
+turns the cache on globally. Note that using the cache invokes the threading     # threading module, maybe it's this?
+module.
+
+The cache temporarily stores a copy of any interim pyfftw.FFTW objects that are 
+created. If they are not used for some period of time, which can be set with 
+pyfftw.interfaces.cache.set_keepalive_time(), then they are removed from the 
+cache (liberating any associated memory). The default keepalive time is 0.1 
+seconds.
+"""

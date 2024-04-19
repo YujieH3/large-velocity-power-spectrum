@@ -249,7 +249,7 @@ def main():
         print(f'NTOT: {NTOT}', flush=True)
         print(f'MAXNBOX: {MAXNBOX}', flush=True)
         print(f'LTOT: {LTOT}', flush=True)
-        print(f'NBUFFER: {NBUFFER}', flush=True)
+        print(f'NBUFFER: {NBUFFER}', flush=True)    
     comm.Barrier() # synchronize all threads before starting the computation
 
     # print(f'Rank: {rank}, r: {r}, s: {s}, t: {t}, Nbox per box: {Nbox}')
@@ -333,183 +333,185 @@ def main():
 
     # -----------------------------PHASE ASSIGNMENT-----------------------------
     # loop over vx, vy, vz component
-    for vi in range(3):
-        # beta is (bx+nb1, by+nb2, bz+nb3)
-        
-        # bidx keeps track of current loop
-        bidx = 0
+    
+    # bidx keeps track of current loop
+    bidx = 0
 
-        for nb1, nb2, nb3 in np.ndindex(n, n, n):
-            # f_idx is the index of the current element in f array
-            # and also the index of the current element in each box
-            f_idx = 0
+    for nb1, nb2, nb3 in np.ndindex(n, n, n):
+        # f_idx is the index of the current element in f array
+        # and also the index of the current element in each box
+        f_idx = 0
 
-            # Memory allocation for queue and f array
-            f = np.empty((Nbox**3), dtype=np.complex64) # folded field with phase.
-            v_queue = np.empty((n_loops, n_queue), dtype=np.float32)
-            x_queue = np.empty((n_loops, n_queue), dtype=np.float32)
-            y_queue = np.empty((n_loops, n_queue), dtype=np.float32)
-            z_queue = np.empty((n_loops, n_queue), dtype=np.float32)
-            while f_idx < Nbox**3:
-                # n_idx is the idx of the current loop, number of boxes covered each core 
-                n_idx = 0
+        # Memory allocation for queue and f array
+        f = np.empty((Nbox**3), dtype=np.complex64) # folded field with phase.
+        v_queue = np.empty((n_loops, n_queue, 3), dtype=np.float32)
+        x_queue = np.empty((n_loops, n_queue), dtype=np.float32)
+        y_queue = np.empty((n_loops, n_queue), dtype=np.float32)
+        z_queue = np.empty((n_loops, n_queue), dtype=np.float32)
+        while f_idx < Nbox**3:
+            # n_idx is the idx of the current loop, number of boxes covered each core 
+            n_idx = 0
 
-                for n1, n2, n3 in np.ndindex(n, n, n):
-                    # Each file will be read 3*n_loop**2 times
-                    box_file = os.path.join(TEMPDIR, f'query_idx_nx{r+n1}_ny{s+n2}_nz{t+n3}.hdf5')
-                    with h5py.File(box_file, 'r') as hf:
-                        # Read only what we need using hdf5 slice.
-                        if f_idx + n_queue < Nbox**3:
-                            i_arr = hf['query_index'][f_idx:f_idx+n_queue] # type:ignore
-                        else:
-                            i_arr = hf['query_index'][f_idx:] # type:ignore
-                    
-                    # 1-D array of velocity of the queried points
-                    v_queue[n_idx, :len(i_arr)] = velocity[i_arr, vi] # type:ignore
-                    
-                    # Coordinates in the sequence as it's filled up. 
-                    x_start = (r+n1) * Nbox * LCELL
-                    y_start = (s+n2) * Nbox * LCELL
-                    z_start = (t+n3) * Nbox * LCELL
-                    x_queue0, y_queue0, z_queue0 = make_xyz(x_start, y_start, z_start, Nbox, LCELL, f_idx, n_queue)
-                    
-                    x_queue[n_idx, :] = x_queue0
-                    y_queue[n_idx, :] = y_queue0
-                    z_queue[n_idx, :] = z_queue0
-
-                    n_idx += 1
-
-                # synchronize and gather the queue to memory of each core
-                vi_gathered = np.array(comm.allgather(v_queue), dtype=np.float32) # a_arr of shape [NTHREADS, n_loops, NBUFFER, 3] all_gather add an axis in the front
-                x_gathered = np.array(comm.allgather(x_queue), dtype=np.float32)
-                y_gathered = np.array(comm.allgather(y_queue), dtype=np.float32)
-                z_gathered = np.array(comm.allgather(z_queue), dtype=np.float32)
-
-                # Reshape. The 0 axis is the axis we want to sum over
-                vi_gathered = vi_gathered.reshape(NTHREADS*n_loops, n_queue) # last variable changing fastest.
-                x_gathered = x_gathered.reshape(NTHREADS*n_loops, n_queue)
-                y_gathered = y_gathered.reshape(NTHREADS*n_loops, n_queue)
-                z_gathered = z_gathered.reshape(NTHREADS*n_loops, n_queue)
-
-                # This phase application is in fact an FFT of some sort.
-                # TODO use fft here to speed things up?
-
-                # Phase factor array. In shape (NTHREADS*n_loops, n_queue).
-                phase = np.exp(
-                    -1j * (2 * np.pi / LTOT) * (
-                        (bx+nb1) * x_gathered + 
-                        (by+nb2) * y_gathered + 
-                        (bz+nb3) * z_gathered
-                        )    # x, y, z / L or nx, ny, nz / N
-                    )
-
-                # Apply phase factor and append to our final fft array
-                if f_idx + n_queue < Nbox**3:
-                    f[f_idx:f_idx+n_queue] = np.sum(vi_gathered * phase, axis=0) / m**1.5 # shape (NBUFFER, 3)
-                    f_idx += n_queue # update the index of the first empty element in f array
-
-                    # Update progress bar
-                    pbar.update(n_queue / (Nbox**3) * 80) if rank == 0 else None # type: ignore
-                else:
-                    temp_idx = Nbox**3 - f_idx
-                    f[f_idx:] = np.sum(vi_gathered[:,:temp_idx] * phase[:,:temp_idx], axis=0) / m**1.5 # indices after leftover are from the precious loop
-                    f_idx = Nbox**3 # update to the end of the array. f_idx will not be used anymore
-
-                    # Update progress bar
-                    pbar.update(temp_idx / (Nbox**3) * 80) if rank == 0 else None # type: ignore
-
+            for n1, n2, n3 in np.ndindex(n, n, n):
+                # Each file will be read 3*n_loop**2 times
+                box_file = os.path.join(TEMPDIR, f'query_idx_nx{r+n1}_ny{s+n2}_nz{t+n3}.hdf5')
+                with h5py.File(box_file, 'r') as hf:
+                    # Read only what we need using hdf5 slice.
+                    if f_idx + n_queue < Nbox**3:
+                        i_arr = hf['query_index'][f_idx:f_idx+n_queue] # type:ignore
+                    else:
+                        i_arr = hf['query_index'][f_idx:] # type:ignore
                 
-                        
-            # f is constructed last index fastest, so C order can reconstruct to the 
-            # correct cube. C order is the default value of reshape btw.
-            f = np.reshape(f, (Nbox, Nbox, Nbox), order='C') # reshape for FFT.
+                # 1-D array of velocity of the queried points
+                v_queue[n_idx, :len(i_arr), :] = velocity[i_arr, :] # type:ignore
+                
+                # Coordinates in the sequence as it's filled up. 
+                x_start = (r+n1) * Nbox * LCELL
+                y_start = (s+n2) * Nbox * LCELL
+                z_start = (t+n3) * Nbox * LCELL
+                x_queue0, y_queue0, z_queue0 = make_xyz(x_start, y_start, z_start, Nbox, LCELL, f_idx, n_queue)
+                
+                x_queue[n_idx, :] = x_queue0
+                y_queue[n_idx, :] = y_queue0
+                z_queue[n_idx, :] = z_queue0
 
-            # --------------------------------FFT-----------------------------------
-            #print(f'[{datetime.datetime.now()}] FFTW: {f.shape}')
+                n_idx += 1
 
-            # TODO save plan if doesn't exist, read if it exists
-            P = FFTW_power(f, Lbox, Nbox)
+            # synchronize and gather the queue to memory of each core
+            v_gathered = np.array(comm.allgather(v_queue), dtype=np.float32) # a_arr of shape [NTHREADS, n_loops, NBUFFER, 3] all_gather add an axis in the front
+            x_gathered = np.array(comm.allgather(x_queue), dtype=np.float32)
+            y_gathered = np.array(comm.allgather(y_queue), dtype=np.float32)
+            z_gathered = np.array(comm.allgather(z_queue), dtype=np.float32)
 
-            #print(f'[{datetime.datetime.now()}] FFTW finished: {P.shape}')
+            # Reshape. The 0 axis is the axis we want to sum over
+            v_gathered = v_gathered.reshape(NTHREADS*n_loops, n_queue, 3) # last variable changing fastest.
+            x_gathered = x_gathered.reshape(NTHREADS*n_loops, n_queue)
+            y_gathered = y_gathered.reshape(NTHREADS*n_loops, n_queue)
+            z_gathered = z_gathered.reshape(NTHREADS*n_loops, n_queue)
 
-            pbar.update(10) if rank == 0 else None # update progress bar # type: ignore
-            
-            # -------------------------------SAMPLE---------------------------------
+            # This phase application is in fact an FFT of some sort.
+            # TODO use fft here to speed things up?
 
-            # Sampling k in concentric spheres
-            Pk = pair_power(P, Lbox, Nbox, shift=-2*np.pi*np.array([bx+nb1, by+nb2, bz+nb3])/LTOT)
-            # print(f'[{datetime.datetime.now()}] Pk: {Pk.shape}')
-            del P
+            # Phase factor array. In shape (NTHREADS*n_loops, n_queue).
+            phase = np.exp(
+                -1j * (2 * np.pi / LTOT) * (
+                    (bx+nb1) * x_gathered + 
+                    (by+nb2) * y_gathered + 
+                    (bz+nb3) * z_gathered
+                    )    # x, y, z / L or nx, ny, nz / N
+                )
 
-            # Sample power spectrum P(k), from the fundamental mode to the Nyquist frequency (half frequency of the smallest scale)
-            Pkk = hist_sample(Pk, kmin=2*np.pi/LTOT, kmax=np.pi/LCELL, spacing=2*np.pi/LTOT)
-            # Pkk = (k, P, Psum, Nsample) of shape (NTOT, 4)
-            del Pk
-            
-            # Use energy spectral density of dimension ~velocity^2/k
-            Pkk[:, 1] *= 4 * np.pi * Pkk[:, 0] ** 2 
+            # Apply phase factor and append to our final fft array
+            if f_idx + n_queue < Nbox**3:
+                f[f_idx:f_idx+n_queue] = np.sum(v_gathered * phase[...,None], axis=0) / m**1.5 # shape (NBUFFER, 3)
+                f_idx += n_queue # update the index of the first empty element in f array
 
-            Pkk = np.array(Pkk, dtype=np.float32) # use float32
-            p_sum = Pkk[:, 2].copy()
-            n_sample = Pkk[:, 3].copy()    
-
-            # print(f'[{datetime.datetime.now()}] Pkk: {Pkk.shape}')
-
-            # ----------------------COMBINE DIFFERENT THREADS-----------------------
-            if rank == 0: # allocate memory for the total sum. It couldn't work on Pkk[:, 2] directly
-                n_pk = len(Pkk)
-                p_sum_tot = np.empty(n_pk, dtype=np.float32)
-                n_sample_tot = np.empty(n_pk, dtype=np.float32)
+                # Update progress bar
+                pbar.update(n_queue / (Nbox**3) * 80) if rank == 0 else None # type: ignore
             else:
-                p_sum_tot = None
-                n_sample_tot = None
+                temp_idx = Nbox**3 - f_idx
+                f[f_idx:] = np.sum(v_gathered[:,:temp_idx] * phase[:,:temp_idx,None], axis=0) / m**1.5 # indices after leftover are from the precious loop
+                f_idx = Nbox**3 # update to the end of the array. f_idx will not be used anymore
 
-            comm.Reduce(sendbuf=p_sum, recvbuf=p_sum_tot, op=MPI.SUM, root=0) # sum up all power spectra to rank 0
-            comm.Reduce(sendbuf=n_sample, recvbuf=n_sample_tot, op=MPI.SUM, root=0)
+                # Update progress bar
+                pbar.update(temp_idx / (Nbox**3) * 80) if rank == 0 else None # type: ignore
+
             
-            if rank == 0:
-                Pkk[:, 2] = p_sum_tot
-                Pkk[:, 3] = n_sample_tot
-                with warnings.catch_warnings():
-                    warnings.filterwarnings("ignore", message="invalid value encountered in divide")
-                    Pkk[:, 1] = Pkk[:, 2] / Pkk[:, 3] * (4 * np.pi * Pkk[:, 0] ** 2)
-                # print(f'[{datetime.datetime.now()}] Pkk: {Pkk.shape}')
+                    
+        # f is constructed last index fastest, so C order can reconstruct to the 
+        # correct cube. C order is the default value of reshape btw.
+        f = np.reshape(f, (Nbox, Nbox, Nbox), order='C') # reshape for FFT.
+
+        # --------------------------------FFT-----------------------------------
+        #print(f'[{datetime.datetime.now()}] FFTW: {f.shape}')
+
+        # Try to keep max memory usage to 4 Nbox**3 arrays.
+        fx = f[:,:,:,0]
+        fy = f[:,:,:,1]
+        fz = f[:,:,:,2]
+        del f
+
+        # TODO save plan if doesn't exist, read if it exists
+        P = FFTW_power(fx, Lbox, Nbox)
+        del fx
+        P += FFTW_power(fy, Lbox, Nbox)
+        del fy
+        P += FFTW_power(fz, Lbox, Nbox)
+        del fz
+
+        #print(f'[{datetime.datetime.now()}] FFTW finished: {P.shape}')
+
+        pbar.update(10) if rank == 0 else None # update progress bar # type: ignore
+        
+        # -------------------------------SAMPLE---------------------------------
+
+        # Sampling k in concentric spheres
+        Pk = pair_power(P, Lbox, Nbox, shift=-2*np.pi*np.array([bx+nb1, by+nb2, bz+nb3])/LTOT)
+        # print(f'[{datetime.datetime.now()}] Pk: {Pk.shape}')
+        del P
+
+        # Sample power spectrum P(k), from the fundamental mode to the Nyquist frequency (half frequency of the smallest scale)
+        Pkk = hist_sample(Pk, kmin=2*np.pi/LTOT, kmax=np.pi/LCELL, spacing=2*np.pi/LTOT)
+        # Pkk = (k, P, Psum, Nsample) of shape (NTOT, 4)
+        del Pk
+        
+        # Use energy spectral density of dimension ~velocity^2/k
+        Pkk[:, 1] *= 4 * np.pi * Pkk[:, 0] ** 2 
+
+        Pkk = np.array(Pkk, dtype=np.float32) # use float32
+        p_sum = Pkk[:, 2].copy()
+        n_sample = Pkk[:, 3].copy()    
+
+        # print(f'[{datetime.datetime.now()}] Pkk: {Pkk.shape}')
+
+        # ----------------------COMBINE DIFFERENT THREADS-----------------------
+        if rank == 0: # allocate memory for the total sum. It couldn't work on Pkk[:, 2] directly
+            n_pk = len(Pkk)
+            p_sum_tot = np.empty(n_pk, dtype=np.float32)
+            n_sample_tot = np.empty(n_pk, dtype=np.float32)
+        else:
+            p_sum_tot = None
+            n_sample_tot = None
+
+        comm.Reduce(sendbuf=p_sum, recvbuf=p_sum_tot, op=MPI.SUM, root=0) # sum up all power spectra to rank 0
+        comm.Reduce(sendbuf=n_sample, recvbuf=n_sample_tot, op=MPI.SUM, root=0)
+        
+        if rank == 0:
+            Pkk[:, 2] = p_sum_tot
+            Pkk[:, 3] = n_sample_tot
+            with warnings.catch_warnings():
+                warnings.filterwarnings("ignore", message="invalid value encountered in divide")
+                Pkk[:, 1] = Pkk[:, 2] / Pkk[:, 3] * (4 * np.pi * Pkk[:, 0] ** 2)
+            # print(f'[{datetime.datetime.now()}] Pkk: {Pkk.shape}')
+        
+        # ------------------SAVE AND COMBINE DIFFERENT LOOPS--------------------
+        
+        if rank == 0 and bidx == 0:
+
+            # Create the file. Overwrite if exists.
+            np.savetxt(outputfile, Pkk)
+            # print(f'[{datetime.datetime.now()}] Saved: {outputfile}')
+        elif rank == 0:
+
+            # Weighted combination
+            Pkk_tot = np.loadtxt(outputfile)
+            Pkk_tot[:, 2] += Pkk[:, 2] # Psum
+            Pkk_tot[:, 3] += Pkk[:, 3] # Nsamples
+
+            # Pk will be overwrite every save, all nans will be removed in the end. No need to flag warnings
+            with warnings.catch_warnings():
+                warnings.filterwarnings("ignore", message="invalid value encountered in divide")
+                Pkk_tot[:, 1] = Pkk_tot[:, 2] / Pkk_tot[:, 3] * (4 * np.pi * Pkk_tot[:, 0] ** 2)
             
-            # ------------------SAVE AND COMBINE DIFFERENT LOOPS--------------------
-            
-            if rank == 0 and bidx == 0 and vi == 0:
+            # Save
+            np.savetxt(outputfile, Pkk_tot)
+            # print(f'[{datetime.datetime.now()}] Combined and saved: {Pkk.shape}')
 
-                # Create the file. Overwrite if exists.
-                np.savetxt(outputfile, Pkk)
-                # print(f'[{datetime.datetime.now()}] Saved: {outputfile}')
-            elif rank == 0:
+        pbar.update(5) if rank == 0 else None # update progress bar # type: ignore
 
-                # Weighted combination
-                Pkk_tot = np.loadtxt(outputfile)
-                Pkk_tot[:, 2] += Pkk[:, 2] # Psum
-                Pkk_tot[:, 3] += Pkk[:, 3] # Nsamples
+        bidx += 1 # beta index for the big loop
 
-                # Pk will be overwrite every save, all nans will be removed in the end. No need to flag warnings
-                with warnings.catch_warnings():
-                    warnings.filterwarnings("ignore", message="invalid value encountered in divide")
-                    Pkk_tot[:, 1] = Pkk_tot[:, 2] / Pkk_tot[:, 3] * (4 * np.pi * Pkk_tot[:, 0] ** 2)
-                
-                # Save
-                np.savetxt(outputfile, Pkk_tot)
-                # print(f'[{datetime.datetime.now()}] Combined and saved: {Pkk.shape}')
-
-            pbar.update(5) if rank == 0 else None # update progress bar # type: ignore
-
-            bidx += 1 # beta index for the big loop
-
-            gc.collect() # garbage collection
-
-    # The addition of different components of velocity should be accumulative, not weighted by Nsamples
-    if rank == 0:
-        Pkk_tot = np.loadtxt(outputfile)
-        Pkk_tot[:, 3] /= 3 # average over 3 components
-        Pkk_tot[:, 1] = Pkk_tot[:, 2] / Pkk_tot[:, 3] * (4 * np.pi * Pkk_tot[:, 0] ** 2)
-        np.savetxt(outputfile, Pkk_tot)
+        gc.collect() # garbage collection
 
     # ------------------------------CLEAN UP-----------------------------------
     pbar.close() if rank == 0 else None # type: ignore
@@ -517,7 +519,8 @@ def main():
     return 0
 
 if __name__ == '__main__':
-    main()
+    if main()==0:
+        print(f'[{datetime.datetime.now()}] Computation finished.')
 
 
 

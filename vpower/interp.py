@@ -1168,7 +1168,7 @@ def read_ann_to_grid(f, Nsize, file):
     return data_grid
 
 
-def fold_particles(pos, m):  # future update: incorporate with Particles class
+def fold_particles(pos, m):
     """
   Takes in coordinate and the folding factor m and output 
   the folded coordinates.
