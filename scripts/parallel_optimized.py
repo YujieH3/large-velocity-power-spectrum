@@ -1,7 +1,6 @@
 from mpi4py import MPI
 import h5py
 import numpy as np
-import math
 from numba import jit, njit
 import pyfftw
 pyfftw.interfaces.cache.enable()
@@ -22,7 +21,7 @@ import warnings
 # DONE use fft_object instead of pyfftw.interfaces.numpy_fft.fftn
 
 # ------------------------------------CONFIG------------------------------------
-SNAPSHOT = '/appalachia/d5/DISK/from_pleiades/snapshots/gmcs0_wind0_gmc9/snapshot_550.hdf5'
+SNAPSHOT = '/ocean/projects/phy220026p/dengyw/yujiehe/power_spec/snapshot_550.hdf5'
 # '/appalachia/d5/DISK/from_pleiades/snapshots/gmcs0_wind0_gmc9/snapshot_550.hdf5'
 NTOT = 1000 # total resolution. The dynamical range would be NTOT/2, from 2pi/NTOT to pi/LCELL
 MAXNBOX = 500 # maximum box size allowed by memory
@@ -60,8 +59,8 @@ FORCE    = args.f
 
 
 def planner(n_total_res, l_total_length, n_box_affordable, n_total_threads):
-    n_threads_per_axis = math.cbrt(n_total_threads)  # number of threads in each dimension = the folding factor
-    assert n_threads_per_axis.is_integer()==True, 'Number of threads must be a cube of an integer. Support for any number is not yet implemented.'
+    n_threads_per_axis = round(n_total_threads**(1/3))  # number of threads in each dimension = the folding factor
+    assert n_threads_per_axis**3==n_total_threads, 'Number of threads must be a cube of an integer. Support for any number is not yet implemented.'
     n_threads_per_axis = int(n_threads_per_axis)
 
     n_loops_per_axis = 1
@@ -129,9 +128,9 @@ def FFTW_power(f, Lbox, Nsize):
     a[:] = f
     fft_object() # the result is stored in b
     del f
-    fk = 0.5 * np.abs(b * const)**2
+    b = 0.5 * np.abs(b * const)**2
 
-    return fk
+    return b
 
 
 
@@ -202,8 +201,7 @@ def main():
     assert os.path.isfile(SNAPSHOT), 'Snapshot file does not exist.'
     
     n_loops, n_threads_per_axis, Nbox, Lbox = planner(NTOT, LTOT, MAXNBOX, NTHREADS)
-    n = math.cbrt(n_loops) # spectrum smoothing in each dimension
-    n = int(n)
+    n = round(n_loops**(1/3)) # number of nboxes in each dimension one core needs to do.
 
     # Seperate NBUFFER into n_queue of n_loops
     assert NBUFFER % n_loops == 0, 'NBUFFER must be divisible by n loops.'
@@ -319,7 +317,7 @@ def main():
 
         # folded field with phase.
         f = np.empty((Nbox**3, 3), dtype=np.complex64) 
-        for i, j, k in np.ndindex(n, n, n):
+        for i, j, k in np.ndindex(Nbox, Nbox, Nbox):
 
             iidx = 0
 
@@ -383,23 +381,24 @@ def main():
         f = np.reshape(f, (Nbox, Nbox, Nbox, 3), order='C') # reshape for FFT.
 
         # ----------------------------FFT-------------------------------
-        #print(f'[{datetime.datetime.now()}] FFTW: {f.shape}')
+        if rank==0:
+            print(f'[{datetime.datetime.now()}] FFTW: {f.shape}')
 
         # Try to keep max memory usage to 4 Nbox**3 arrays.
         fx = f[:,:,:,0]
         fy = f[:,:,:,1]
         fz = f[:,:,:,2]
-        del f
 
         # TODO save plan if doesn't exist, read if it exists
         P = FFTW_power(fx, Lbox, Nbox)
-        del fx
+        #del fx
         P += FFTW_power(fy, Lbox, Nbox)
-        del fy
+        #del fy
         P += FFTW_power(fz, Lbox, Nbox)
-        del fz
+        #del fz
 
-        #print(f'[{datetime.datetime.now()}] FFTW finished: {P.shape}')
+        if rank==0:
+            print(f'[{datetime.datetime.now()}] FFTW finished: {P.shape}')
 
         pbar.update(10) if rank == 0 else None # update progress bar # type: ignore
         
@@ -441,13 +440,13 @@ def main():
             with warnings.catch_warnings():
                 warnings.filterwarnings("ignore", message="invalid value encountered in divide")
                 Pkk[:, 1] = Pkk[:, 2] / Pkk[:, 3] * (4 * np.pi * Pkk[:, 0] ** 2)
-            # print(f'[{datetime.datetime.now()}] Pkk: {Pkk.shape}')
+            print(f'[{datetime.datetime.now()}] Pkk: {Pkk.shape}')
         
         # ----------------------------SAVE------------------------------
         
         if rank == 0 and bidx == 0:
             np.savetxt(outputfile, Pkk) # save however you want. Let's make a simple text file for now.
-            #print(f'[{datetime.datetime.now()}] Saved: {outputfile}')
+            print(f'[{datetime.datetime.now()}] Saved: {outputfile}')
         elif rank == 0 and bidx > 0:
             Pkk_tot = np.loadtxt(outputfile)
             Pkk_tot[:, 2] += Pkk[:, 2]
@@ -458,7 +457,7 @@ def main():
                 warnings.filterwarnings("ignore", message="invalid value encountered in divide")
                 Pkk_tot[:, 1] = Pkk_tot[:, 2] / Pkk_tot[:, 3] * (4 * np.pi * Pkk_tot[:, 0] ** 2)
             np.savetxt(outputfile, Pkk_tot)
-            #print(f'[{datetime.datetime.now()}] Combined and saved: {Pkk.shape}')
+            print(f'[{datetime.datetime.now()}] Combined and saved: {Pkk.shape}')
 
         pbar.update(5) if rank == 0 else None # update progress bar # type: ignore
 
@@ -467,6 +466,8 @@ def main():
         gc.collect() # garbage collection
 
     pbar.close() if rank == 0 else None # type: ignore
+
+    return 0
 
 if __name__ == '__main__':
     assert main() == 0, 'Program stopped before completion.'
