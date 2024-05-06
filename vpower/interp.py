@@ -131,7 +131,6 @@ def load_snapshot(file, Lbox=1.0,
     return gasParticles
 
 
-
 # -----------------------GAS PARTICLES CLASS---------------------
 class GasParticles:
 
