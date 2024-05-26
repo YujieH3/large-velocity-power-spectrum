@@ -1,3 +1,5 @@
+# mpiexec -n 8 python parallel_optimized.py -i {input} -o {output} -N 1000 -M 500 -f
+
 from mpi4py import MPI
 import h5py
 import numpy as np
