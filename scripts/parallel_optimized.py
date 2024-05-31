@@ -1,4 +1,4 @@
-# mpiexec -n 8 python parallel_optimized.py -i {input} -o {output} -N 1000 -M 500 -f
+# time mpiexec -n 8 python parallel_optimized.py -i {input} -o {output} -N 1000 -M 500 -b 10000
 
 from mpi4py import MPI
 import h5py
@@ -15,23 +15,21 @@ import sys # debug
 import os
 import datetime # benchmarking
 import gc # garbage collection
-#from memory_profiler import profile
 import warnings
 
-# TODO numba acceleration of the loop? No the loop is not the bottleneck. Possibly the synchronize
-# SOLVED the fftw threading bug? Turns out to be a conda package issue.
-# DONE use fft_object instead of pyfftw.interfaces.numpy_fft.fftn
+from memory_profiler import profile
+# time mpiexec -n 8 python -m memory_profiler parallel_optimized.py -i {input} -o {output} -N 1000 -M 500 -b 10000 
 
 # ------------------------------------CONFIG------------------------------------
-SNAPSHOT = '/ocean/projects/phy220026p/dengyw/yujiehe/power_spec/snapshot_550.hdf5'
-# '/appalachia/d5/DISK/from_pleiades/snapshots/gmcs0_wind0_gmc9/snapshot_550.hdf5'
+# SNAPSHOT = '/ocean/projects/phy220026p/dengyw/yujiehe/power_spec/snapshot_550.hdf5'
+SNAPSHOT = '/appalachia/d5/DISK/from_pleiades/snapshots/gmcs0_wind0_gmc9/snapshot_550.hdf5'
+SAVEDIR = '../output/'
+
 NTOT = 1000 # total resolution. The dynamical range would be NTOT/2, from 2pi/NTOT to pi/LCELL
 MAXNBOX = 500 # maximum box size allowed by memory
+NBUFFER = 5000 # number of points to query before synchronize.
 
 LTOT = 1 # kpc
-
-NBUFFER = 5000 # number of points to query before synchronize.
-SAVEDIR = '../output/'
 
 remove_bulk_velocity = True
 # -----------------------------------PARSE ARGS---------------------------------
@@ -95,17 +93,17 @@ def FFTW_vector_power(fx, fy, fz, Lbox, Nsize):
     fft_object = pyfftw.FFTW(a, b, axes=(0,1,2)) # input is a, output is b 
     # maybe initialize f as an empty aligned array?
     
-    a[:] = fx
+    a = fx
     fft_object() # the result is stored in b
     del fx
     fk = 0.5 * np.abs(b * const)**2
 
-    a[:] = fy
+    a = fy
     fft_object()
     del fy
     fk += 0.5 * np.abs(b * const)**2
 
-    a[:] = fz
+    a = fz
     fft_object()
     del fz
     fk += 0.5 * np.abs(b * const)**2
@@ -113,7 +111,7 @@ def FFTW_vector_power(fx, fy, fz, Lbox, Nsize):
     return fk
 
 
-
+# @profile
 def FFTW_power(f, Lbox, Nsize):
     """
     Same with vector_power, but using the fft_object to allow full power of 
@@ -122,16 +120,11 @@ def FFTW_power(f, Lbox, Nsize):
     # Fourier transform
     const = (Lbox / (2 * np.pi)) ** 1.5 / Nsize ** 3
 
-    a = pyfftw.empty_aligned((Nsize, Nsize, Nsize), dtype='complex64')
     b = pyfftw.empty_aligned((Nsize, Nsize, Nsize), dtype='complex64')
-    fft_object = pyfftw.FFTW(a, b, axes=(0,1,2)) # input is a, output is b 
-    # maybe initialize f as an empty aligned array?
-    
-    a[:] = f
-    fft_object() # the result is stored in b
-    del f
-    b = 0.5 * np.abs(b * const)**2
+    fft_object = pyfftw.FFTW(f, b, axes=(0,1,2)) # input is f, output is b 
 
+    fft_object() # the result is stored in b
+    b = 0.5 * np.abs(b * const)**2
     return b
 
 
@@ -186,8 +179,9 @@ def hist_sample(Pk_pair, kmin, kmax, spacing):
 
 # -----------------------------------MAIN---------------------------------------
 
-# @profile # this slow down the program tremendously, remember to comment it out
+# this slow down the program tremendously, remember to comment it out
 # except when profiling.
+# @profile
 def main():
     comm = MPI.COMM_WORLD
     rank = comm.Get_rank() # thread number
@@ -318,7 +312,10 @@ def main():
         z_queue = np.empty((n_loops, n_queue), dtype=np.float32)
 
         # folded field with phase.
-        f = np.empty((Nbox**3, 3), dtype=np.complex64) 
+        fx = pyfftw.empty_aligned((Nbox**3), dtype='complex64')
+        fy = pyfftw.empty_aligned((Nbox**3), dtype='complex64')
+        fz = pyfftw.empty_aligned((Nbox**3), dtype='complex64')
+        f = np.stack((fx, fy, fz), axis=-1)
         for i, j, k in np.ndindex(Nbox, Nbox, Nbox):
 
             iidx = 0
@@ -357,7 +354,7 @@ def main():
                 y_arr = y_arr.reshape(NTHREADS*n_loops, n_queue) # Tested to work
                 z_arr = z_arr.reshape(NTHREADS*n_loops, n_queue)
 
-                # This phase application is infact an FFT of some sort.
+                # This phase application is in fact an FFT of some sort.
                 # TODO use fft here to speed things up
                 phase = np.exp(
                     -1j * (2 * np.pi / LTOT) * ((bx+nb1) * x_arr + (by+nb2) * y_arr + (bz+nb3) * z_arr)    # x, y, z / L or nx, ny, nz / N
@@ -387,17 +384,12 @@ def main():
             print(f'[{datetime.datetime.now()}] FFTW: {f.shape}')
 
         # Try to keep max memory usage to 4 Nbox**3 arrays.
-        fx = f[:,:,:,0]
-        fy = f[:,:,:,1]
-        fz = f[:,:,:,2]
 
         # TODO save plan if doesn't exist, read if it exists
-        P = FFTW_power(fx, Lbox, Nbox)
-        #del fx
-        P += FFTW_power(fy, Lbox, Nbox)
-        #del fy
-        P += FFTW_power(fz, Lbox, Nbox)
-        #del fz
+        P = FFTW_power(f[:,:,:,0], Lbox, Nbox)
+        P += FFTW_power(f[:,:,:,1], Lbox, Nbox)
+        P += FFTW_power(f[:,:,:,2], Lbox, Nbox)
+        # P = FFTW_vector_power(fx, fy, fz, Lbox, Nbox)
 
         if rank==0:
             print(f'[{datetime.datetime.now()}] FFTW finished: {P.shape}')
@@ -419,9 +411,6 @@ def main():
         Pkk[:, 1] *= 4 * np.pi * Pkk[:, 0] ** 2 
         
         Pkk = np.array(Pkk, dtype=np.float32) # use float32
-        p_sum = Pkk[:, 2].copy()
-        n_sample = Pkk[:, 3].copy()    
-
         # print(f'[{datetime.datetime.now()}] Pkk: {Pkk.shape}')
 
         # ---------------------------COMBINE----------------------------
@@ -433,9 +422,11 @@ def main():
             p_sum_tot = None
             n_sample_tot = None
 
+        p_sum = Pkk[:, 2].copy()
+        n_sample = Pkk[:, 3].copy()   
         comm.Reduce(sendbuf=p_sum, recvbuf=p_sum_tot, op=MPI.SUM, root=0) # sum up all power spectra to rank 0
         comm.Reduce(sendbuf=n_sample, recvbuf=n_sample_tot, op=MPI.SUM, root=0)
-        
+
         if rank == 0:
             Pkk[:, 2] = p_sum_tot
             Pkk[:, 3] = n_sample_tot
