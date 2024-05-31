@@ -22,11 +22,11 @@ def FFTW_power(f, Lbox, Nsize):
     # maybe initialize f as an empty aligned array?
     
     a[:] = f
-    fft_object() # the result is stored in b
     del f
-    fk = 0.5 * np.abs(b * const)**2
+    fft_object() # the result is stored in b
+    b = 0.5 * np.abs(b * const)**2
 
-    return fk
+    return b
 
 
 #@profile

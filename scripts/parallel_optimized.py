@@ -23,16 +23,15 @@ import warnings
 # DONE use fft_object instead of pyfftw.interfaces.numpy_fft.fftn
 
 # ------------------------------------CONFIG------------------------------------
-SNAPSHOT = '/ocean/projects/phy220026p/dengyw/yujiehe/power_spec/snapshot_550.hdf5'
-# '/appalachia/d5/DISK/from_pleiades/snapshots/gmcs0_wind0_gmc9/snapshot_550.hdf5'
+# SNAPSHOT = '/ocean/projects/phy220026p/dengyw/yujiehe/power_spec/snapshot_550.hdf5'
+SNAPSHOT = '/appalachia/d5/DISK/from_pleiades/snapshots/gmcs0_wind0_gmc9/snapshot_550.hdf5'
+SAVEDIR = '../output/'
+NBUFFER = 5000 # number of points to query before synchronize.
+
 NTOT = 1000 # total resolution. The dynamical range would be NTOT/2, from 2pi/NTOT to pi/LCELL
 MAXNBOX = 500 # maximum box size allowed by memory
 
 LTOT = 1 # kpc
-
-NBUFFER = 5000 # number of points to query before synchronize.
-SAVEDIR = '../output/'
-
 remove_bulk_velocity = True
 # -----------------------------------PARSE ARGS---------------------------------
 
