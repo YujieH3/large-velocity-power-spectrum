@@ -1,22 +1,20 @@
 from mpi4py import MPI
 import numpy as np
+import pyfftw
 
 comm = MPI.COMM_WORLD
 size = comm.Get_size()
 rank = comm.Get_rank()
 
-from tqdm import tqdm
-import time
+if rank == 0:
+    b = pyfftw.empty_aligned((size, 5), dtype='complex64')
+else:
+    b = None
 
-# Create a progress bar with a total of 100\
-pbar = tqdm(total=100) if rank == 0 else None
+a = pyfftw.empty_aligned((5), dtype='complex64')
+a[:] = np.arange(5) + rank
 
-for i in range(10):
-    # Do some work
-    time.sleep(0.1)
-    # Update the progress bar
-    pbar.update(0.5) if rank == 0 else None
-
-# Close the progress bar
-pbar.close() if rank == 0 else None
-
+comm.Gather(a, b, root=0)
+print(b)
+print(np.shape(b))
+print(type(a))
