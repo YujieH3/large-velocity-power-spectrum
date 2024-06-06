@@ -3,7 +3,7 @@
 from mpi4py import MPI
 import h5py
 import numpy as np
-from numba import jit, njit
+# from numba import jit, njit
 import pyfftw
 pyfftw.interfaces.cache.enable()
 
@@ -18,9 +18,9 @@ import gc # garbage collection
 #from memory_profiler import profile
 import warnings
 
-# TODO numba acceleration of the loop? No the loop is not the bottleneck. Possibly the synchronize
-# SOLVED the fftw threading bug? Turns out to be a conda package issue.
-# DONE use fft_object instead of pyfftw.interfaces.numpy_fft.fftn
+
+
+
 
 # ------------------------------------CONFIG------------------------------------
 # SNAPSHOT = '/ocean/projects/phy220026p/dengyw/yujiehe/power_spec/snapshot_550.hdf5'
@@ -33,6 +33,10 @@ MAXNBOX = 500 # maximum box size allowed by memory
 
 LTOT = 1 # kpc
 remove_bulk_velocity = True
+
+
+
+
 # -----------------------------------PARSE ARGS---------------------------------
 
 parser = argparse.ArgumentParser(description="""Compute power spectrum in parallel. 
@@ -55,6 +59,10 @@ MAXNBOX  = args.maxnbox
 LTOT     = args.ltot
 NBUFFER  = args.nbuffer
 FORCE    = args.f
+
+
+
+
 
 # -----------------------------------FUNCTIONS----------------------------------
 
@@ -80,7 +88,7 @@ def planner(n_total_res, l_total_length, n_box_affordable, n_total_threads):
     return n_loops, n_threads_per_axis, n_box, l_box
 
 
-# @profile
+
 def FFTW_vector_power(fx, fy, fz, Lbox, Nsize):
     """
     Same with vector_power, but using the fft_object to allow full power of 
@@ -128,7 +136,6 @@ def FFTW_power(f, Lbox, Nsize):
     
     a[:] = f
     fft_object() # the result is stored in b
-    del f
     b = 0.5 * np.abs(b * const)**2
 
     return b
@@ -183,6 +190,10 @@ def hist_sample(Pk_pair, kmin, kmax, spacing):
     return Pvk
 
 
+
+
+
+
 # -----------------------------------MAIN---------------------------------------
 
 # @profile # this slow down the program tremendously, remember to comment it out
@@ -193,6 +204,10 @@ def main():
     NTHREADS = comm.Get_size() # number of threads
 
     LCELL = LTOT / NTOT  # kpc 
+
+
+
+
 
     # ------------------------------ALLOCATE WORK-------------------------------
     # Interpolation box assignment, with auto planner
@@ -215,16 +230,7 @@ def main():
     s = n * ((rank % n_threads_per_axis**2) // n_threads_per_axis)
     t = n * (rank // n_threads_per_axis**2)
 
-    # Phase factor assignment. Because every queried point is needed for every FFT,
-    # if we cannot assign one chunk per core because of memory limit, we'll
-    # have to make each core to do the work of, say, 8 cores, to query 8 times before
-    # synchronize and assign phase and sum up. However if we also apply 8 phases
-    # and sum 8 times, we will have to save 8 times the memory, which is exactly
-    # what we want to avoid. It seems that there is no way around so we do only
-    # one FFT each core and hence get a slightly lower spectral resolution, but
-    # the same dynamical range. Or else we can do the same interpolation of 
-    # 10000**3 points 8 times, splitting to 1000 cores would only take 47*8 minutes
-    # actually. It's doable but not efficient. Let's see if the first option can work
+    # Phase factor assignment. 
     bx = r # bx, by, bz are not necessarily equal to r, s, t. and is assigned to each CPU
     by = s # can modify this later to allow for more flexible
     bz = t # task assignment.
@@ -249,9 +255,16 @@ def main():
 
     # print(f'Rank: {rank}, r: {r}, s: {s}, t: {t}, Nbox per box: {Nbox}')
 
+
+
+
     # ------------------------------PROGRESS BAR--------------------------------
 
     pbar = tqdm.tqdm(total=100 * n_loops, ncols=100, bar_format='{l_bar}{bar}| [{elapsed}<{remaining}]') if rank == 0 else None
+
+
+
+
 
     # --------------------------------LOAD DATA---------------------------------
     print(f'[{datetime.datetime.now()}] Load snapshot: {SNAPSHOT}')
@@ -277,6 +290,10 @@ def main():
         # free memory. python garbage collector will take care of this after.
         del mass, M
 
+
+
+
+
     # --------------------------------BUILD INDEX-------------------------------
     print(f'[{datetime.datetime.now()}] Build index: {coords.shape}') # type: ignore # TODO save and load index
     
@@ -296,12 +313,11 @@ def main():
         print(f'[{datetime.datetime.now()}] Index built')
     pbar.update(5) if rank == 0 else None # type:ignore
 
+
+
+
+
     # --------------------------------QUERY-------------------------------------
-    # TODO a big loop to interpolate-FFT-combine-save and again for a new box
-    # to save memory, spread task over time. Something like Nmaxbox, the biggest
-    # box size that can fit into memory. Spread NTOT=m*Nbox*n_loops
-    # where Nbox is the largest integer < Nmaxbox that keeps n_loops an integer.
-    # So it's a factorization problem of NTOT/m.
     
     bidx = 0
     for nb1, nb2, nb3 in np.ndindex(n,n,n):
@@ -381,28 +397,28 @@ def main():
         # correct cube. C order is the default value of reshape btw.
         f = np.reshape(f, (Nbox, Nbox, Nbox, 3), order='C') # reshape for FFT.
 
+
+
+
+
         # ----------------------------FFT-------------------------------
         if rank==0:
             print(f'[{datetime.datetime.now()}] FFTW: {f.shape}')
 
-        # Try to keep max memory usage to 4 Nbox**3 arrays.
-        fx = f[:,:,:,0]
-        fy = f[:,:,:,1]
-        fz = f[:,:,:,2]
-
-        # TODO save plan if doesn't exist, read if it exists
-        P = FFTW_power(fx, Lbox, Nbox)
-        #del fx
-        P += FFTW_power(fy, Lbox, Nbox)
-        #del fy
-        P += FFTW_power(fz, Lbox, Nbox)
-        #del fz
+        # FFT
+        P =  FFTW_power(f[...,0], Lbox, Nbox)
+        P += FFTW_power(f[...,1], Lbox, Nbox)
+        P += FFTW_power(f[...,2], Lbox, Nbox)
 
         if rank==0:
             print(f'[{datetime.datetime.now()}] FFTW finished: {P.shape}')
 
         pbar.update(10) if rank == 0 else None # update progress bar # type: ignore
         
+
+
+
+
         # ---------------------------SAMPLE-----------------------------
 
         # Sampling k in concentric spheres
@@ -423,6 +439,10 @@ def main():
 
         # print(f'[{datetime.datetime.now()}] Pkk: {Pkk.shape}')
 
+
+
+
+
         # ---------------------------COMBINE----------------------------
         if rank == 0: # allocate memory for the total sum. It couldn't work on Pkk[:, 2] directly
             n_pk = len(Pkk)
@@ -442,7 +462,11 @@ def main():
                 warnings.filterwarnings("ignore", message="invalid value encountered in divide")
                 Pkk[:, 1] = Pkk[:, 2] / Pkk[:, 3] * (4 * np.pi * Pkk[:, 0] ** 2)
             print(f'[{datetime.datetime.now()}] Pkk: {Pkk.shape}')
-        
+
+
+
+
+
         # ----------------------------SAVE------------------------------
         
         if rank == 0 and bidx == 0:
