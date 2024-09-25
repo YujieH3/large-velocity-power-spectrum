@@ -22,13 +22,11 @@ def fftw_power_copy(f, Lbox, Nsize):
     fft_object = pyfftw.FFTW(a, b, axes=(0,1,2)) # input is a, output is b 
     # maybe initialize f as an empty aligned array?
     
-    a[:] = f
-    del f # Since the content of f is already copied to a, we can delete f. Hopefully this can free memory to only store 4 arrays
-    gc.collect()
-    fft_object() # the result is stored in b
-    b = 0.5 * np.abs(b * const)**2
+    #a[:] = f
+    f = fft_object(f) # the result is stored in b
+    f = 0.5 * np.abs(f * const)**2
 
-    return b
+    return f
 
 
 @profile
@@ -100,9 +98,9 @@ def main():
     # Fourier transform
     const = (1. / (2 * np.pi)) ** 1.5 / Nsize ** 3
 
-    a = pyfftw.empty_aligned((Nsize, Nsize, Nsize), dtype='complex64')
-    b = pyfftw.empty_aligned((Nsize, Nsize, Nsize), dtype='complex64')
-    fft_object = pyfftw.FFTW(a, b, axes=(0,1,2)) # input is a, output is b 
+    #a = pyfftw.empty_aligned((Nsize, Nsize, Nsize), dtype='complex64')
+    #b = pyfftw.empty_aligned((Nsize, Nsize, Nsize), dtype='complex64')
+    #fft_object = pyfftw.FFTW(a, b, axes=(0,1,2)) # input is a, output is b 
     # maybe initialize f as an empty aligned array?
 
     fx = f[..., 0]
@@ -110,28 +108,26 @@ def main():
     fz = f[..., 2]
     del f
 
-    a[:] = fx
-    del fx
-    fft_object() # the result is stored in b
-    P1 = 0.5 * np.abs(b * const)**2
+    #fx = pyfftw.byte_align(fx)
+    fx = pyfftw.interfaces.numpy_fft.fftn(fx, overwrite_input=True)
+    P1 = 0.5 * np.abs(fx * const)**2
 
-    a[:] = fy
-    del fy
-    fft_object()
-    P1 += 0.5 * np.abs(b * const)**2
+    #fy = pyfftw.byte_align(fy)
+    fy = pyfftw.interfaces.numpy_fft.fftn(fy, overwrite_input=True)
+    P1 += 0.5 * np.abs(fy * const)**2
 
-    a[:] = fz
-    del fz
-    fft_object()
-    P1 += 0.5 * np.abs(b * const)**2
+    #fz = pyfftw.byte_align(fz)
+    fz = pyfftw.interfaces.numpy_fft.fftn(fz, overwrite_input=True)
+    P1 += 0.5 * np.abs(fz * const)**2
 
     
     print(time.perf_counter() - t1)
 
 
-
+    #print(P)
+    #print(P1)
     # Check if they produce the same results
-    print(np.allclose(P, P1))
+    print('The two methods gives the same results:', np.allclose(P, P1))
 
 
 
