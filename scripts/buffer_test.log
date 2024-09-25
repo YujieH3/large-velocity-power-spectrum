@@ -1,0 +1,294 @@
+[2024-04-15 10:13:28.203700] Planner: 1 loops, 2 fold, 250 size each thread.
+Accept plan? (y/n)
+Plan confirmed. Starting computation.
+Snapshot: /appalachia/d5/DISK/from_pleiades/snapshots/gmcs0_wind0_gmc9/snapshot_550.hdf5
+Output file: ../output/Pk.txt
+NTOT: 500
+MAXNBOX: 250
+LTOT: 1
+NBUFFER: 10000000
+[2024-04-15 10:13:28.871349] Load snapshot: /appalachia/d5/DISK/from_pleiades/snapshots/gmcs0_wind0_gmc9/snapshot_550.hdf5
+[2024-04-15 10:13:29.971243] Build index: (9619086, 3)
+[2024-04-15 10:13:29.971422] Index loaded
+[2024-04-15 10:13:29.971905] FFTW: (250, 250, 250, 3)
+[2024-04-15 10:13:37.421049] FFTW finished: (250, 250, 250)
+[2024-04-15 10:13:28.868256] Load snapshot: /appalachia/d5/DISK/from_pleiades/snapshots/gmcs0_wind0_gmc9/snapshot_550.hdf5
+[2024-04-15 10:13:29.926531] Build index: (9619086, 3)
+[2024-04-15 10:13:29.926693] Index loaded
+[2024-04-15 10:13:29.927189] FFTW: (250, 250, 250, 3)
+[2024-04-15 10:13:38.488163] FFTW finished: (250, 250, 250)
+[2024-04-15 10:13:28.868313] Load snapshot: /appalachia/d5/DISK/from_pleiades/snapshots/gmcs0_wind0_gmc9/snapshot_550.hdf5
+[2024-04-15 10:13:29.957306] Build index: (9619086, 3)
+[2024-04-15 10:13:29.957498] Index loaded
+[2024-04-15 10:13:29.958001] FFTW: (250, 250, 250, 3)
+[2024-04-15 10:13:38.482482] FFTW finished: (250, 250, 250)
+[2024-04-15 10:13:28.873285] Load snapshot: /appalachia/d5/DISK/from_pleiades/snapshots/gmcs0_wind0_gmc9/snapshot_550.hdf5
+[2024-04-15 10:13:29.953565] Build index: (9619086, 3)
+[2024-04-15 10:13:29.953785] Index loaded
+[2024-04-15 10:13:29.954344] FFTW: (250, 250, 250, 3)
+[2024-04-15 10:13:38.517780] FFTW finished: (250, 250, 250)
+[2024-04-15 10:13:28.868252] Load snapshot: /appalachia/d5/DISK/from_pleiades/snapshots/gmcs0_wind0_gmc9/snapshot_550.hdf5
+[2024-04-15 10:13:29.931716] Build index: (9619086, 3)
+[2024-04-15 10:13:29.931848] Index loaded
+[2024-04-15 10:13:29.932318] FFTW: (250, 250, 250, 3)
+[2024-04-15 10:13:38.452107] FFTW finished: (250, 250, 250)
+[2024-04-15 10:13:28.868321] Load snapshot: /appalachia/d5/DISK/from_pleiades/snapshots/gmcs0_wind0_gmc9/snapshot_550.hdf5
+[2024-04-15 10:13:29.974795] Build index: (9619086, 3)
+[2024-04-15 10:13:29.974971] Index loaded
+[2024-04-15 10:13:29.975480] FFTW: (250, 250, 250, 3)
+[2024-04-15 10:13:38.807138] FFTW finished: (250, 250, 250)
+[2024-04-15 10:13:28.885908] Load snapshot: /appalachia/d5/DISK/from_pleiades/snapshots/gmcs0_wind0_gmc9/snapshot_550.hdf5
+[2024-04-15 10:13:29.997580] Build index: (9619086, 3)
+[2024-04-15 10:13:29.997714] Index loaded
+[2024-04-15 10:13:30.010572] FFTW: (250, 250, 250, 3)
+[2024-04-15 10:13:38.548176] FFTW finished: (250, 250, 250)
+[2024-04-15 10:13:44.795184] Saved: ../output/Pk.txt
+[2024-04-15 10:13:28.868238] Load snapshot: /appalachia/d5/DISK/from_pleiades/snapshots/gmcs0_wind0_gmc9/snapshot_550.hdf5
+[2024-04-15 10:13:30.479912] Build index: (9619086, 3)
+[2024-04-15 10:13:30.480064] Index loaded
+[2024-04-15 10:13:30.480487] FFTW: (250, 250, 250, 3)
+[2024-04-15 10:13:41.897282] FFTW finished: (250, 250, 250)
+[2024-04-15 10:13:47.857406] Planner: 1 loops, 2 fold, 250 size each thread.
+Accept plan? (y/n)
+Plan confirmed. Starting computation.
+Snapshot: /appalachia/d5/DISK/from_pleiades/snapshots/gmcs0_wind0_gmc9/snapshot_550.hdf5
+Output file: ../output/Pk.txt
+NTOT: 500
+MAXNBOX: 250
+LTOT: 1
+NBUFFER: 1000000
+[2024-04-15 10:13:48.447246] Load snapshot: /appalachia/d5/DISK/from_pleiades/snapshots/gmcs0_wind0_gmc9/snapshot_550.hdf5
+[2024-04-15 10:13:49.549190] Build index: (9619086, 3)
+[2024-04-15 10:13:49.549370] Index loaded
+[2024-04-15 10:13:49.549886] FFTW: (250, 250, 250, 3)
+[2024-04-15 10:13:58.069371] FFTW finished: (250, 250, 250)
+[2024-04-15 10:13:48.447221] Load snapshot: /appalachia/d5/DISK/from_pleiades/snapshots/gmcs0_wind0_gmc9/snapshot_550.hdf5
+[2024-04-15 10:13:49.585487] Build index: (9619086, 3)
+[2024-04-15 10:13:49.585620] Index loaded
+[2024-04-15 10:13:49.586008] FFTW: (250, 250, 250, 3)
+[2024-04-15 10:13:58.135092] FFTW finished: (250, 250, 250)
+[2024-04-15 10:13:48.444346] Load snapshot: /appalachia/d5/DISK/from_pleiades/snapshots/gmcs0_wind0_gmc9/snapshot_550.hdf5
+[2024-04-15 10:13:49.596292] Build index: (9619086, 3)
+[2024-04-15 10:13:49.596537] Index loaded
+[2024-04-15 10:13:49.597066] FFTW: (250, 250, 250, 3)
+[2024-04-15 10:13:58.320497] FFTW finished: (250, 250, 250)
+[2024-04-15 10:13:48.447330] Load snapshot: /appalachia/d5/DISK/from_pleiades/snapshots/gmcs0_wind0_gmc9/snapshot_550.hdf5
+[2024-04-15 10:13:49.600663] Build index: (9619086, 3)
+[2024-04-15 10:13:49.600865] Index loaded
+[2024-04-15 10:13:49.601366] FFTW: (250, 250, 250, 3)
+[2024-04-15 10:13:58.312780] FFTW finished: (250, 250, 250)
+[2024-04-15 10:13:48.447230] Load snapshot: /appalachia/d5/DISK/from_pleiades/snapshots/gmcs0_wind0_gmc9/snapshot_550.hdf5
+[2024-04-15 10:13:49.608564] Build index: (9619086, 3)
+[2024-04-15 10:13:49.608696] Index loaded
+[2024-04-15 10:13:49.609067] FFTW: (250, 250, 250, 3)
+[2024-04-15 10:13:58.329439] FFTW finished: (250, 250, 250)
+[2024-04-15 10:13:48.463114] Load snapshot: /appalachia/d5/DISK/from_pleiades/snapshots/gmcs0_wind0_gmc9/snapshot_550.hdf5
+[2024-04-15 10:13:49.599432] Build index: (9619086, 3)
+[2024-04-15 10:13:49.599529] Index loaded
+[2024-04-15 10:13:49.611560] FFTW: (250, 250, 250, 3)
+[2024-04-15 10:13:58.186822] FFTW finished: (250, 250, 250)
+[2024-04-15 10:14:01.631988] Saved: ../output/Pk.txt
+[2024-04-15 10:13:48.450459] Load snapshot: /appalachia/d5/DISK/from_pleiades/snapshots/gmcs0_wind0_gmc9/snapshot_550.hdf5
+[2024-04-15 10:13:49.599154] Build index: (9619086, 3)
+[2024-04-15 10:13:49.599388] Index loaded
+[2024-04-15 10:13:49.599878] FFTW: (250, 250, 250, 3)
+[2024-04-15 10:13:58.474697] FFTW finished: (250, 250, 250)
+[2024-04-15 10:13:48.444396] Load snapshot: /appalachia/d5/DISK/from_pleiades/snapshots/gmcs0_wind0_gmc9/snapshot_550.hdf5
+[2024-04-15 10:13:49.574457] Build index: (9619086, 3)
+[2024-04-15 10:13:49.574680] Index loaded
+[2024-04-15 10:13:49.575514] FFTW: (250, 250, 250, 3)
+[2024-04-15 10:13:58.214035] FFTW finished: (250, 250, 250)
+[2024-04-15 10:14:05.461214] Planner: 1 loops, 2 fold, 250 size each thread.
+Accept plan? (y/n)
+Plan confirmed. Starting computation.
+Snapshot: /appalachia/d5/DISK/from_pleiades/snapshots/gmcs0_wind0_gmc9/snapshot_550.hdf5
+Output file: ../output/Pk.txt
+NTOT: 500
+MAXNBOX: 250
+LTOT: 1
+NBUFFER: 100000
+[2024-04-15 10:14:05.619251] Load snapshot: /appalachia/d5/DISK/from_pleiades/snapshots/gmcs0_wind0_gmc9/snapshot_550.hdf5
+[2024-04-15 10:14:06.731187] Build index: (9619086, 3)
+[2024-04-15 10:14:06.731386] Index loaded
+[2024-04-15 10:14:06.731842] FFTW: (250, 250, 250, 3)
+[2024-04-15 10:14:15.237203] FFTW finished: (250, 250, 250)
+[2024-04-15 10:14:05.602316] Load snapshot: /appalachia/d5/DISK/from_pleiades/snapshots/gmcs0_wind0_gmc9/snapshot_550.hdf5
+[2024-04-15 10:14:06.714098] Build index: (9619086, 3)
+[2024-04-15 10:14:06.714302] Index loaded
+[2024-04-15 10:14:06.714753] FFTW: (250, 250, 250, 3)
+[2024-04-15 10:14:15.353754] FFTW finished: (250, 250, 250)
+[2024-04-15 10:14:05.614265] Load snapshot: /appalachia/d5/DISK/from_pleiades/snapshots/gmcs0_wind0_gmc9/snapshot_550.hdf5
+[2024-04-15 10:14:06.756197] Build index: (9619086, 3)
+[2024-04-15 10:14:06.756386] Index loaded
+[2024-04-15 10:14:06.756829] FFTW: (250, 250, 250, 3)
+[2024-04-15 10:14:15.367635] FFTW finished: (250, 250, 250)
+[2024-04-15 10:14:05.603379] Load snapshot: /appalachia/d5/DISK/from_pleiades/snapshots/gmcs0_wind0_gmc9/snapshot_550.hdf5
+[2024-04-15 10:14:07.200026] Build index: (9619086, 3)
+[2024-04-15 10:14:07.200160] Index loaded
+[2024-04-15 10:14:07.200559] FFTW: (250, 250, 250, 3)
+[2024-04-15 10:14:16.166561] FFTW finished: (250, 250, 250)
+[2024-04-15 10:14:05.616252] Load snapshot: /appalachia/d5/DISK/from_pleiades/snapshots/gmcs0_wind0_gmc9/snapshot_550.hdf5
+[2024-04-15 10:14:06.737331] Build index: (9619086, 3)
+[2024-04-15 10:14:06.737529] Index loaded
+[2024-04-15 10:14:06.737955] FFTW: (250, 250, 250, 3)
+[2024-04-15 10:14:15.366308] FFTW finished: (250, 250, 250)
+[2024-04-15 10:14:05.619283] Load snapshot: /appalachia/d5/DISK/from_pleiades/snapshots/gmcs0_wind0_gmc9/snapshot_550.hdf5
+[2024-04-15 10:14:06.713141] Build index: (9619086, 3)
+[2024-04-15 10:14:06.713315] Index loaded
+[2024-04-15 10:14:06.720719] FFTW: (250, 250, 250, 3)
+[2024-04-15 10:14:15.253841] FFTW finished: (250, 250, 250)
+[2024-04-15 10:14:19.196149] Saved: ../output/Pk.txt
+[2024-04-15 10:14:05.617259] Load snapshot: /appalachia/d5/DISK/from_pleiades/snapshots/gmcs0_wind0_gmc9/snapshot_550.hdf5
+[2024-04-15 10:14:06.728140] Build index: (9619086, 3)
+[2024-04-15 10:14:06.728318] Index loaded
+[2024-04-15 10:14:06.728757] FFTW: (250, 250, 250, 3)
+[2024-04-15 10:14:16.234613] FFTW finished: (250, 250, 250)
+[2024-04-15 10:14:05.606459] Load snapshot: /appalachia/d5/DISK/from_pleiades/snapshots/gmcs0_wind0_gmc9/snapshot_550.hdf5
+[2024-04-15 10:14:06.713654] Build index: (9619086, 3)
+[2024-04-15 10:14:06.713859] Index loaded
+[2024-04-15 10:14:06.714297] FFTW: (250, 250, 250, 3)
+[2024-04-15 10:14:15.973024] FFTW finished: (250, 250, 250)
+[2024-04-15 10:14:22.342966] Planner: 1 loops, 2 fold, 250 size each thread.
+Accept plan? (y/n)
+Plan confirmed. Starting computation.
+Snapshot: /appalachia/d5/DISK/from_pleiades/snapshots/gmcs0_wind0_gmc9/snapshot_550.hdf5
+Output file: ../output/Pk.txt
+NTOT: 500
+MAXNBOX: 250
+LTOT: 1
+NBUFFER: 10000
+[2024-04-15 10:14:22.802264] Load snapshot: /appalachia/d5/DISK/from_pleiades/snapshots/gmcs0_wind0_gmc9/snapshot_550.hdf5
+[2024-04-15 10:14:23.868290] Build index: (9619086, 3)
+[2024-04-15 10:14:23.868494] Index loaded
+[2024-04-15 10:14:23.868905] FFTW: (250, 250, 250, 3)
+[2024-04-15 10:14:31.681129] FFTW finished: (250, 250, 250)
+[2024-04-15 10:14:22.790208] Load snapshot: /appalachia/d5/DISK/from_pleiades/snapshots/gmcs0_wind0_gmc9/snapshot_550.hdf5
+[2024-04-15 10:14:23.828377] Build index: (9619086, 3)
+[2024-04-15 10:14:23.828527] Index loaded
+[2024-04-15 10:14:23.828968] FFTW: (250, 250, 250, 3)
+[2024-04-15 10:14:32.387888] FFTW finished: (250, 250, 250)
+[2024-04-15 10:14:22.781273] Load snapshot: /appalachia/d5/DISK/from_pleiades/snapshots/gmcs0_wind0_gmc9/snapshot_550.hdf5
+[2024-04-15 10:14:23.852606] Build index: (9619086, 3)
+[2024-04-15 10:14:23.852767] Index loaded
+[2024-04-15 10:14:23.853470] FFTW: (250, 250, 250, 3)
+[2024-04-15 10:14:32.408841] FFTW finished: (250, 250, 250)
+[2024-04-15 10:14:22.794244] Load snapshot: /appalachia/d5/DISK/from_pleiades/snapshots/gmcs0_wind0_gmc9/snapshot_550.hdf5
+[2024-04-15 10:14:23.887995] Build index: (9619086, 3)
+[2024-04-15 10:14:23.888182] Index loaded
+[2024-04-15 10:14:23.888612] FFTW: (250, 250, 250, 3)
+[2024-04-15 10:14:32.419870] FFTW finished: (250, 250, 250)
+[2024-04-15 10:14:22.797139] Load snapshot: /appalachia/d5/DISK/from_pleiades/snapshots/gmcs0_wind0_gmc9/snapshot_550.hdf5
+[2024-04-15 10:14:23.883118] Build index: (9619086, 3)
+[2024-04-15 10:14:23.883326] Index loaded
+[2024-04-15 10:14:23.883728] FFTW: (250, 250, 250, 3)
+[2024-04-15 10:14:32.607208] FFTW finished: (250, 250, 250)
+[2024-04-15 10:14:22.800266] Load snapshot: /appalachia/d5/DISK/from_pleiades/snapshots/gmcs0_wind0_gmc9/snapshot_550.hdf5
+[2024-04-15 10:14:23.877467] Build index: (9619086, 3)
+[2024-04-15 10:14:23.877648] Index loaded
+[2024-04-15 10:14:23.878135] FFTW: (250, 250, 250, 3)
+[2024-04-15 10:14:32.474508] FFTW finished: (250, 250, 250)
+[2024-04-15 10:14:22.811760] Load snapshot: /appalachia/d5/DISK/from_pleiades/snapshots/gmcs0_wind0_gmc9/snapshot_550.hdf5
+[2024-04-15 10:14:23.875220] Build index: (9619086, 3)
+[2024-04-15 10:14:23.875316] Index loaded
+[2024-04-15 10:14:23.875958] FFTW: (250, 250, 250, 3)
+[2024-04-15 10:14:32.398346] FFTW finished: (250, 250, 250)
+[2024-04-15 10:14:38.422246] Saved: ../output/Pk.txt
+[2024-04-15 10:14:22.794186] Load snapshot: /appalachia/d5/DISK/from_pleiades/snapshots/gmcs0_wind0_gmc9/snapshot_550.hdf5
+[2024-04-15 10:14:24.380679] Build index: (9619086, 3)
+[2024-04-15 10:14:24.380834] Index loaded
+[2024-04-15 10:14:24.381251] FFTW: (250, 250, 250, 3)
+[2024-04-15 10:14:35.470236] FFTW finished: (250, 250, 250)
+[2024-04-15 10:14:41.768310] Planner: 1 loops, 2 fold, 250 size each thread.
+Accept plan? (y/n)
+Plan confirmed. Starting computation.
+Snapshot: /appalachia/d5/DISK/from_pleiades/snapshots/gmcs0_wind0_gmc9/snapshot_550.hdf5
+Output file: ../output/Pk.txt
+NTOT: 500
+MAXNBOX: 250
+LTOT: 1
+NBUFFER: 1000
+[2024-04-15 10:14:42.129407] Load snapshot: /appalachia/d5/DISK/from_pleiades/snapshots/gmcs0_wind0_gmc9/snapshot_550.hdf5
+[2024-04-15 10:14:43.226184] Build index: (9619086, 3)
+[2024-04-15 10:14:43.226316] Index loaded
+[2024-04-15 10:14:43.226728] FFTW: (250, 250, 250, 3)
+[2024-04-15 10:14:51.790453] FFTW finished: (250, 250, 250)
+[2024-04-15 10:14:42.129229] Load snapshot: /appalachia/d5/DISK/from_pleiades/snapshots/gmcs0_wind0_gmc9/snapshot_550.hdf5
+[2024-04-15 10:14:43.218754] Build index: (9619086, 3)
+[2024-04-15 10:14:43.218880] Index loaded
+[2024-04-15 10:14:43.219267] FFTW: (250, 250, 250, 3)
+[2024-04-15 10:14:51.837637] FFTW finished: (250, 250, 250)
+[2024-04-15 10:14:42.129347] Load snapshot: /appalachia/d5/DISK/from_pleiades/snapshots/gmcs0_wind0_gmc9/snapshot_550.hdf5
+[2024-04-15 10:14:43.190954] Build index: (9619086, 3)
+[2024-04-15 10:14:43.191217] Index loaded
+[2024-04-15 10:14:43.192014] FFTW: (250, 250, 250, 3)
+[2024-04-15 10:14:51.873646] FFTW finished: (250, 250, 250)
+[2024-04-15 10:14:42.144547] Load snapshot: /appalachia/d5/DISK/from_pleiades/snapshots/gmcs0_wind0_gmc9/snapshot_550.hdf5
+[2024-04-15 10:14:43.235952] Build index: (9619086, 3)
+[2024-04-15 10:14:43.236063] Index loaded
+[2024-04-15 10:14:43.236456] FFTW: (250, 250, 250, 3)
+[2024-04-15 10:14:51.817592] FFTW finished: (250, 250, 250)
+[2024-04-15 10:14:42.140002] Load snapshot: /appalachia/d5/DISK/from_pleiades/snapshots/gmcs0_wind0_gmc9/snapshot_550.hdf5
+[2024-04-15 10:14:43.247982] Build index: (9619086, 3)
+[2024-04-15 10:14:43.248102] Index loaded
+[2024-04-15 10:14:43.248416] FFTW: (250, 250, 250, 3)
+[2024-04-15 10:14:51.866237] FFTW finished: (250, 250, 250)
+[2024-04-15 10:14:42.155281] Load snapshot: /appalachia/d5/DISK/from_pleiades/snapshots/gmcs0_wind0_gmc9/snapshot_550.hdf5
+[2024-04-15 10:14:43.285804] Build index: (9619086, 3)
+[2024-04-15 10:14:43.286038] Index loaded
+[2024-04-15 10:14:43.286803] FFTW: (250, 250, 250, 3)
+[2024-04-15 10:14:51.875172] FFTW finished: (250, 250, 250)
+[2024-04-15 10:14:42.139764] Load snapshot: /appalachia/d5/DISK/from_pleiades/snapshots/gmcs0_wind0_gmc9/snapshot_550.hdf5
+[2024-04-15 10:14:43.217133] Build index: (9619086, 3)
+[2024-04-15 10:14:43.217273] Index loaded
+[2024-04-15 10:14:43.230508] FFTW: (250, 250, 250, 3)
+[2024-04-15 10:14:51.922469] FFTW finished: (250, 250, 250)
+[2024-04-15 10:14:54.916043] Saved: ../output/Pk.txt
+[2024-04-15 10:14:42.140018] Load snapshot: /appalachia/d5/DISK/from_pleiades/snapshots/gmcs0_wind0_gmc9/snapshot_550.hdf5
+[2024-04-15 10:14:43.231644] Build index: (9619086, 3)
+[2024-04-15 10:14:43.231763] Index loaded
+[2024-04-15 10:14:43.232123] FFTW: (250, 250, 250, 3)
+[2024-04-15 10:14:52.054231] FFTW finished: (250, 250, 250)
+[2024-04-15 10:14:58.542354] Planner: 1 loops, 2 fold, 250 size each thread.
+Accept plan? (y/n)
+Plan confirmed. Starting computation.
+Snapshot: /appalachia/d5/DISK/from_pleiades/snapshots/gmcs0_wind0_gmc9/snapshot_550.hdf5
+Output file: ../output/Pk.txt
+NTOT: 500
+MAXNBOX: 250
+LTOT: 1
+NBUFFER: 10000000
+[mpiexec@appalachia.astro.columbia.edu] Sending Ctrl-C to processes as requested
+[mpiexec@appalachia.astro.columbia.edu] Press Ctrl-C again to force abort
+
+===================================================================================
+=   BAD TERMINATION OF ONE OF YOUR APPLICATION PROCESSES
+=   PID 3337691 RUNNING AT appalachia.astro.columbia.edu
+=   EXIT CODE: 9
+=   CLEANING UP REMAINING PROCESSES
+=   YOU CAN IGNORE THE BELOW CLEANUP MESSAGES
+===================================================================================
+YOUR APPLICATION TERMINATED WITH THE EXIT STRING: Segmentation fault (signal 11)
+This typically refers to a problem with your application.
+Please see the FAQ page for debugging suggestions
+[mpiexec@appalachia.astro.columbia.edu] Sending Ctrl-C to processes as requested
+[mpiexec@appalachia.astro.columbia.edu] Press Ctrl-C again to force abort
+
+===================================================================================
+=   BAD TERMINATION OF ONE OF YOUR APPLICATION PROCESSES
+=   PID 3338135 RUNNING AT appalachia.astro.columbia.edu
+=   EXIT CODE: 9
+=   CLEANING UP REMAINING PROCESSES
+=   YOU CAN IGNORE THE BELOW CLEANUP MESSAGES
+===================================================================================
+YOUR APPLICATION TERMINATED WITH THE EXIT STRING: Segmentation fault (signal 11)
+This typically refers to a problem with your application.
+Please see the FAQ page for debugging suggestions
+[mpiexec@appalachia.astro.columbia.edu] Sending Ctrl-C to processes as requested
+[mpiexec@appalachia.astro.columbia.edu] Press Ctrl-C again to force abort
+Ctrl-C caught... cleaning up processes
+[mpiexec@appalachia.astro.columbia.edu] Sending Ctrl-C to processes as requested
+[mpiexec@appalachia.astro.columbia.edu] Press Ctrl-C again to force abort
+Ctrl-C caught... cleaning up processes
+[mpiexec@appalachia.astro.columbia.edu] Sending Ctrl-C to processes as requested
+[mpiexec@appalachia.astro.columbia.edu] Press Ctrl-C again to force abort
+Ctrl-C caught... cleaning up processes

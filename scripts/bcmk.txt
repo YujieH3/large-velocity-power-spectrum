@@ -1,0 +1,154 @@
+Filename: /appalachia/d6/yujie/Test_PowerSpec/scripts/fftw_mem_profile.py
+
+Line #    Mem usage    Increment  Occurrences   Line Contents
+=============================================================
+    11   3156.7 MiB   3156.7 MiB           1   @profile
+    12                                         def fftw_power_copy(f, Lbox, Nsize):
+    13                                             """
+    14                                             Same with vector_power, but using the fft_object to allow full power of 
+    15                                             FFTW.
+    16                                             """
+    17                                             # Fourier transform
+    18   3156.7 MiB      0.0 MiB           1       const = (Lbox / (2 * np.pi)) ** 1.5 / Nsize ** 3
+    19                                         
+    20   3156.7 MiB      0.0 MiB           1       a = pyfftw.empty_aligned((Nsize, Nsize, Nsize), dtype='complex64')
+    21   3156.7 MiB      0.0 MiB           1       b = pyfftw.empty_aligned((Nsize, Nsize, Nsize), dtype='complex64')
+    22   4181.4 MiB   1024.7 MiB           1       fft_object = pyfftw.FFTW(a, b, axes=(0,1,2)) # input is a, output is b 
+    23                                             # maybe initialize f as an empty aligned array?
+    24                                             
+    25                                             #a[:] = f
+    26   5205.3 MiB   1024.0 MiB           1       f = fft_object(f) # the result is stored in b
+    27   5717.4 MiB    512.1 MiB           1       f = 0.5 * np.abs(f * const)**2
+    28                                         
+    29   5717.4 MiB      0.0 MiB           1       return f
+
+
+Filename: /appalachia/d6/yujie/Test_PowerSpec/scripts/fftw_mem_profile.py
+
+Line #    Mem usage    Increment  Occurrences   Line Contents
+=============================================================
+    11   3669.8 MiB   3669.8 MiB           1   @profile
+    12                                         def fftw_power_copy(f, Lbox, Nsize):
+    13                                             """
+    14                                             Same with vector_power, but using the fft_object to allow full power of 
+    15                                             FFTW.
+    16                                             """
+    17                                             # Fourier transform
+    18   3669.8 MiB      0.0 MiB           1       const = (Lbox / (2 * np.pi)) ** 1.5 / Nsize ** 3
+    19                                         
+    20   3669.8 MiB      0.0 MiB           1       a = pyfftw.empty_aligned((Nsize, Nsize, Nsize), dtype='complex64')
+    21   3669.8 MiB      0.0 MiB           1       b = pyfftw.empty_aligned((Nsize, Nsize, Nsize), dtype='complex64')
+    22   3669.8 MiB      0.0 MiB           1       fft_object = pyfftw.FFTW(a, b, axes=(0,1,2)) # input is a, output is b 
+    23                                             # maybe initialize f as an empty aligned array?
+    24                                             
+    25                                             #a[:] = f
+    26   5717.6 MiB   2047.8 MiB           1       f = fft_object(f) # the result is stored in b
+    27   6229.9 MiB    512.2 MiB           1       f = 0.5 * np.abs(f * const)**2
+    28                                         
+    29   6229.9 MiB      0.0 MiB           1       return f
+
+
+Filename: /appalachia/d6/yujie/Test_PowerSpec/scripts/fftw_mem_profile.py
+
+Line #    Mem usage    Increment  Occurrences   Line Contents
+=============================================================
+    11   3669.8 MiB   3669.8 MiB           1   @profile
+    12                                         def fftw_power_copy(f, Lbox, Nsize):
+    13                                             """
+    14                                             Same with vector_power, but using the fft_object to allow full power of 
+    15                                             FFTW.
+    16                                             """
+    17                                             # Fourier transform
+    18   3669.8 MiB      0.0 MiB           1       const = (Lbox / (2 * np.pi)) ** 1.5 / Nsize ** 3
+    19                                         
+    20   3669.8 MiB      0.0 MiB           1       a = pyfftw.empty_aligned((Nsize, Nsize, Nsize), dtype='complex64')
+    21   3669.8 MiB      0.0 MiB           1       b = pyfftw.empty_aligned((Nsize, Nsize, Nsize), dtype='complex64')
+    22   3669.8 MiB      0.0 MiB           1       fft_object = pyfftw.FFTW(a, b, axes=(0,1,2)) # input is a, output is b 
+    23                                             # maybe initialize f as an empty aligned array?
+    24                                             
+    25                                             #a[:] = f
+    26   5717.8 MiB   2048.0 MiB           1       f = fft_object(f) # the result is stored in b
+    27   6229.9 MiB    512.0 MiB           1       f = 0.5 * np.abs(f * const)**2
+    28                                         
+    29   6229.9 MiB      0.0 MiB           1       return f
+
+
+34.612134389579296
+
+
+55.76535811647773
+The two methods gives the same results: True
+Filename: /appalachia/d6/yujie/Test_PowerSpec/scripts/fftw_mem_profile.py
+
+Line #    Mem usage    Increment  Occurrences   Line Contents
+=============================================================
+    63     84.3 MiB     84.3 MiB           1   @profile
+    64                                         def main():
+    65                                         
+    66                                         
+    67                                         
+    68                                             # The old, standard version.
+    69     84.3 MiB      0.0 MiB           1       Nsize = 512
+    70     84.3 MiB      0.0 MiB           1       np.random.seed(1)
+    71     84.3 MiB      0.0 MiB           1       f = np.empty((Nsize, Nsize, Nsize, 3), dtype='complex64')
+    72   3156.6 MiB   3072.3 MiB           1       f += np.random.rand(Nsize, Nsize, Nsize, 3).astype('float32')
+    73   3156.7 MiB      0.1 MiB           1       f += 1j*np.random.rand(Nsize, Nsize, Nsize, 3).astype('float32')
+    74                                         
+    75                                             # Use same random field, compare the output
+    76   3156.7 MiB      0.0 MiB           1       for i in range(3):
+    77   3156.7 MiB      0.0 MiB           1           t1 = time.perf_counter()
+    78   3669.8 MiB    513.1 MiB           1           P =  fftw_power_copy(f[...,0], 1, Nsize)
+    79   3669.8 MiB      0.0 MiB           1           P += fftw_power_copy(f[...,1], 1, Nsize)
+    80   3669.9 MiB      0.0 MiB           1           P += fftw_power_copy(f[...,2], 1, Nsize)
+    81   3669.9 MiB      0.0 MiB           1           print(time.perf_counter() - t1)
+    82   3669.9 MiB      0.0 MiB           1           break
+    83                                         
+    84                                         
+    85   3669.9 MiB      0.0 MiB           1       print('\n')
+    86                                         
+    87                                         
+    88                                             # Do it in the main function
+    89   3669.9 MiB      0.0 MiB           1       Nsize = 512
+    90   3669.9 MiB      0.0 MiB           1       np.random.seed(1)
+    91    597.9 MiB  -3072.0 MiB           1       f = np.empty((Nsize, Nsize, Nsize, 3), dtype='complex64')
+    92   3669.9 MiB   3072.0 MiB           1       f += np.random.rand(Nsize, Nsize, Nsize, 3).astype('float32')
+    93   3669.9 MiB      0.0 MiB           1       f += 1j*np.random.rand(Nsize, Nsize, Nsize, 3).astype('float32')
+    94                                         
+    95                                             # Use same random field, compare the output
+    96   3669.9 MiB      0.0 MiB           1       t1 = time.perf_counter()
+    97                                             
+    98                                             # Fourier transform
+    99   3669.9 MiB      0.0 MiB           1       const = (1. / (2 * np.pi)) ** 1.5 / Nsize ** 3
+   100                                         
+   101                                             #a = pyfftw.empty_aligned((Nsize, Nsize, Nsize), dtype='complex64')
+   102                                             #b = pyfftw.empty_aligned((Nsize, Nsize, Nsize), dtype='complex64')
+   103                                             #fft_object = pyfftw.FFTW(a, b, axes=(0,1,2)) # input is a, output is b 
+   104                                             # maybe initialize f as an empty aligned array?
+   105                                         
+   106   3669.9 MiB      0.0 MiB           1       fx = f[..., 0]
+   107   3669.9 MiB      0.0 MiB           1       fy = f[..., 1]
+   108   3669.9 MiB      0.0 MiB           1       fz = f[..., 2]
+   109   3669.9 MiB      0.0 MiB           1       del f
+   110                                         
+   111                                             #fx = pyfftw.byte_align(fx)
+   112   4693.9 MiB   1024.0 MiB           1       fx = pyfftw.interfaces.numpy_fft.fftn(fx, overwrite_input=True)
+   113   5205.9 MiB    512.0 MiB           1       P1 = 0.5 * np.abs(fx * const)**2
+   114                                         
+   115                                             #fy = pyfftw.byte_align(fy)
+   116   6229.9 MiB   1024.0 MiB           1       fy = pyfftw.interfaces.numpy_fft.fftn(fy, overwrite_input=True)
+   117   6229.9 MiB      0.0 MiB           1       P1 += 0.5 * np.abs(fy * const)**2
+   118                                         
+   119                                             #fz = pyfftw.byte_align(fz)
+   120   4181.9 MiB  -2048.0 MiB           1       fz = pyfftw.interfaces.numpy_fft.fftn(fz, overwrite_input=True)
+   121   4181.9 MiB      0.0 MiB           1       P1 += 0.5 * np.abs(fz * const)**2
+   122                                         
+   123                                             
+   124   4181.9 MiB      0.0 MiB           1       print(time.perf_counter() - t1)
+   125                                         
+   126                                         
+   127                                             #print(P)
+   128                                             #print(P1)
+   129                                             # Check if they produce the same results
+   130   4182.0 MiB      0.1 MiB           1       print('The two methods gives the same results:', np.allclose(P, P1))
+
+
