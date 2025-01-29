@@ -1,9 +1,6 @@
 # Large Velocity Power Spectrum
 
 [![](https://img.shields.io/github/license/YujieH3/Large-Velocity-Power-Spectrum.svg)](LICENSE.md)
-![Work in Progress](https://img.shields.io/badge/status-in%20progress-yellow)
-
-> **Warning:** This project is in active development. Some features may change, and full documentation will be available soon.
 
 <!-- [![Documentation Status](https://readthedocs.org/projects/vpower/badge/?version=latest)](https://vpower.readthedocs.io/en/latest/?badge=latest) -->
 
